@@ -1,0 +1,16 @@
+# 로컬 저장 데이터와 복구 파일
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data.json
+data.*.json
+배치프로그램-미저장-*.json
+
+# 개발 환경
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db

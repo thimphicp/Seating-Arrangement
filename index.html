@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<script src="persistence.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">   <!-- favicon 요청(404) 방지 -->
+<title>교실 자리배치 프로그램</title>
+<style>
+  /* ────────────────────────────────────────────
+     자리 배치 — 회색 한 계열 + 파랑 하나, 이모지 없음, 모서리 2/4/6px.
+     칸 크기를 재는 fit() 과 그 변수(--nm · --no · --w · --gap …)는 그대로 쓴다.
+     더한 것 : 줄(1줄…) · 분단(1분단…) 머리글 — 자리 위치를 눈으로 짚으려고.
+     ──────────────────────────────────────────── */
+  :root{
+    --bg:#f5f5f5;
+    --surface:#ffffff;
+    --card:#ffffff;
+    --line:#e6e6e6;
+    --line-2:#d9d9d9;
+    --ink:#1e1e1e;
+    --ink-2:#757575;
+    --ink-soft:#757575;
+    --ink-3:#b3b3b3;
+    --accent:#0d99ff;
+    --ok:#1e1e1e;
+    --danger:#d93025;
+
+    --r-sm:2px;
+    --r-md:4px;
+    --r-lg:6px;
+  }
+  *{box-sizing:border-box;}
+  [hidden]{display:none !important;}
+  html,body{height:100%;}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",-apple-system,"Segoe UI",sans-serif;
+    font-size:12px;line-height:1.45;-webkit-font-smoothing:antialiased;
+  }
+  .app{height:100vh;display:flex;flex-direction:column;}
+
+  /* ── 페이지 전환 ── */
+  @keyframes pageOutLeft {from{transform:none;opacity:1} to{transform:translateX(-14px);opacity:0}}
+  @keyframes pageOutRight{from{transform:none;opacity:1} to{transform:translateX(14px);opacity:0}}
+  @keyframes pageInRight {from{transform:translateX(16px);opacity:0} to{transform:none;opacity:1}}
+  @keyframes pageInLeft  {from{transform:translateX(-16px);opacity:0} to{transform:none;opacity:1}}
+  body.leaving-left  .app{animation:pageOutLeft .15s ease-in forwards;}
+  body.leaving-right .app{animation:pageOutRight .15s ease-in forwards;}
+  body.entering-right .app{animation:pageInRight .22s cubic-bezier(.22,.61,.36,1);}
+  body.entering-left  .app{animation:pageInLeft .22s cubic-bezier(.22,.61,.36,1);}
+  @media (prefers-reduced-motion: reduce){
+    body.leaving-left .app,body.leaving-right .app,
+    body.entering-right .app,body.entering-left .app{animation:none;}
+  }
+
+  /* ── 상단 도구 막대 ── */
+  .topbar{
+    flex:none;height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;
+    background:#ebebeb;border-bottom:1px solid #dcdcdc;
+  }
+  .left{display:flex;align-items:center;gap:10px;min-width:0;}
+  .tools{display:flex;align-items:center;gap:4px;margin-left:auto;}
+  .sep{width:1px;height:20px;background:#d5d5d5;flex:none;}
+
+  .pager{display:flex;gap:1px;align-items:center;}
+  .pager button{
+    border:none;background:transparent;color:var(--ink-2);
+    font-size:14px;font-weight:500;padding:6px 12px;border-radius:var(--r-md);
+  }
+  .pager button:hover{background:#dedede;color:var(--ink);}
+  .pager button.on{background:var(--surface);color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  button{
+    font-family:inherit;cursor:pointer;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+    border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+    border-radius:var(--r-md);font-size:13px;font-weight:500;
+  }
+  button:hover{background:#f5f5f5;}
+  button:disabled{opacity:.45;cursor:default;}
+  button:disabled:hover{background:var(--surface);}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  button svg{flex:none;}
+  button.primary,button.done{
+    background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600;
+  }
+  button.primary:hover,button.done:hover{background:#000;}
+  button.primary:disabled:hover,button.done:disabled:hover{background:var(--ink);}
+  button.on,#tvBtn.on,#printBtn.open{background:#dcdcdc;border-color:#c4c4c4;color:var(--ink);}
+  button.on:hover{background:#d3d3d3;}
+  /* 시안의 quiet : 테두리만 투명하고 배경은 흰색 — 회색 바 위에서 하얀 칩으로 보인다 */
+  .quiet{border-color:transparent;color:var(--ink-2);}
+  .quiet:hover{background:#dedede;color:var(--ink);}
+  .icon{padding:0 9px;}
+
+  /* 저장 상태 — 글자만. 문제가 있을 때만 붉게 */
+  .chip-btn{
+    border-color:transparent;background:transparent;max-width:240px;
+    color:var(--ink-2);font-size:13px;font-weight:400;padding:0 4px;
+  }
+  .chip-btn:hover{background:#dedede;color:var(--ink);}
+  .chip-btn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .chip-btn.attn{color:var(--danger);}
+  .chip-btn.attn:hover{background:#f7eceb;}
+
+  .placed-date{
+    display:flex;align-items:center;gap:6px;
+    font-size:13px;color:var(--ink-2);white-space:nowrap;
+  }
+  .placed-date .suffix{margin-left:2px;color:var(--ink-3);}
+
+  /* ── 배치도 ── */
+  .stage{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:5px 12px 4px;}
+  /* 교탁·자리 쪽 가운데에 맞춘다 — 왼쪽 줄 번호 칸만큼(--board-shift) 오른쪽으로 */
+  .mode-note{
+    flex:none;align-self:center;transform:translateX(var(--board-shift,0px));
+    font-size:12.5px;color:var(--ink-2);
+    background:#ededed;border:1px solid var(--line-2);border-radius:var(--r-md);padding:5px 12px;
+  }
+  .mode-note b{font-weight:600;color:var(--ink);}
+  .chart-title{
+    flex:none;width:min(620px,92%);margin:0 auto;text-align:center;
+    font-size:15px;font-weight:600;letter-spacing:-.02em;color:var(--ink);
+    padding:2px 10px;line-height:1.3;
+  }
+
+  .area{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;}
+  .board{display:flex;flex-direction:column;align-items:center;gap:calc(var(--gap,14px) * .55);}
+  .podium-bar{
+    flex:none;display:flex;align-items:center;justify-content:center;
+    margin-left:calc(var(--lab,0px) + var(--gap-pair,0px));
+    border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--surface);
+    font-size:var(--nm,19px);font-weight:500;letter-spacing:.14em;color:var(--ink-2);
+  }
+
+  /* 줄·분단 머리글이 왼쪽 첫 칸과 첫 줄을 차지한다 */
+  .grid{
+    display:grid;
+    grid-template-columns:var(--lab,0px) repeat(var(--pairs),minmax(0,1fr));
+    column-gap:var(--gap-pair,24px);row-gap:var(--gap,14px);width:var(--w,100%);
+  }
+  /* 머리글은 자리 글자 크기를 따라가지 않는다 — 따라가면 줄 높이가 훌쩍 뛰어
+     배치도가 아래로 넘치고 '1줄' 이 두 줄로 접힌다 */
+  .colh,.rowh{
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:500;color:var(--ink-3);white-space:nowrap;
+  }
+  .colh{align-items:flex-end;line-height:1.4;}
+
+  /* 짝꿍 둘을 한 칸(.pair)으로 묶고, 분단 사이만 조금 더 띄운다 */
+  .pair{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:var(--gap-in,8px);min-width:0;
+    padding:calc(var(--gap-in,8px) * .5);border-radius:var(--r-lg);background:#ededed;
+  }
+  .seat{
+    position:relative;aspect-ratio:1.62/1;
+    background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-md);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    cursor:grab;user-select:none;
+    transition:border-color .15s ease,background .15s ease,transform .12s ease;
+  }
+  .seat:hover{border-color:var(--ink-3);}
+  .seat:active{cursor:grabbing;}
+  .seat.empty{border-style:dashed;border-color:#cfcfcf;background:#fafafa;cursor:pointer;}
+  /* 고정 = 테두리로만. 손으로 바꾼 자리 = 점선 */
+  .seat.locked{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);}
+  .seat.swapped{border-style:dashed;border-color:var(--ink);}
+  .seat.drag-over{border-color:var(--ink);border-style:dashed;background:#f0f0f0;}
+  .seat.dragging{opacity:.35;}
+  .seat .nm{
+    font-size:var(--nm,19px);font-weight:500;letter-spacing:-.02em;line-height:1.15;
+    text-align:center;padding:0 6px;
+  }
+  .seat .nm.long{font-size:calc(var(--nm,19px) * .82);}
+  .seat .no{
+    font-size:var(--no,12.5px);color:var(--ink-3);font-weight:400;white-space:nowrap;
+    font-variant-numeric:tabular-nums;
+  }
+  /* 모서리 표시는 번호와 따로 : 번호만 키워도 크기는 그대로 */
+  .seat .mark{position:absolute;top:5px;right:7px;font-size:calc(var(--nm,19px) * .5);opacity:.75;}
+  .seat.pop{animation:pop .34s cubic-bezier(.2,1.5,.4,1);}
+  @keyframes pop{0%{transform:scale(.94);opacity:.4}100%{transform:scale(1);opacity:1}}
+
+  /* 추첨 중 : 살짝 움츠렸다가 이름이 빠르게 바뀐다 */
+  body.spinning .grid{transform:scale(.99);transition:transform .18s ease;}
+  body.spinning .seat .nm{opacity:.72;}
+  body.spinning .seat .no{opacity:.45;}
+
+  /* 확정 : 한 칸씩 차례로 내려앉는다 (--d 만큼 늦게 시작) */
+  .seat.settle{animation:settle .46s cubic-bezier(.2,1.35,.35,1) var(--d,0ms) both;}
+  @keyframes settle{
+    0%  {transform:scale(.88) translateY(-8px);opacity:0;}
+    58% {transform:scale(1.04) translateY(0);opacity:1;}
+    100%{transform:none;opacity:1;}
+  }
+
+  /* 이름 바꾸기 모드 */
+  .seat .ed{
+    width:86%;text-align:center;font-family:inherit;font-weight:500;letter-spacing:-.02em;
+    font-size:var(--nm,19px);color:var(--ink);background:#fff;
+    border:none;border-bottom:1px solid var(--line-2);border-radius:0;padding:2px 4px;
+  }
+  .seat .ed:focus{outline:none;border-bottom-color:var(--ink);}
+  body.editing .seat{cursor:text;border-color:var(--line-2);background:#fff;}
+  body.editing .seat.locked{border-color:var(--ink);}
+  body.editing .seat:focus-within{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);}
+  body.editing .seat .mark{display:none;}
+  /* 이름 바꾸기 중에는 상단에 '완료' 버튼만 남긴다 */
+  #doneEdit{display:none;}
+  body.editing #doneEdit{display:inline-flex;}
+  body.editing .tools > *:not(#doneEdit){display:none !important;}
+
+  .legend{
+    flex:none;font-size:12px;color:var(--ink-3);
+    display:flex;gap:16px;flex-wrap:wrap;justify-content:center;align-items:center;
+  }
+  .chip{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:11px;height:11px;border-radius:var(--r-sm);border:1px solid var(--ink-3);}
+  .swatch.lock{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);}
+  .swatch.swap{border-color:var(--ink);border-style:dashed;}
+  .legend .edit-tip{color:var(--ink);font-weight:600;}
+
+  /* ── 오른쪽에 덧씌우는 창 : 추가 설정 · 인쇄 ── */
+  .backdrop{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.12);}
+  .sheet{
+    position:absolute;top:0;right:0;width:420px;max-width:100%;height:100%;
+    overflow-y:auto;background:var(--surface);
+    border-left:1px solid var(--line-2);border-radius:0;
+    padding:16px;display:flex;flex-direction:column;gap:14px;
+    box-shadow:-8px 0 24px rgba(0,0,0,.10);
+  }
+  .sheet h2{
+    margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em;
+    padding-bottom:10px;border-bottom:1px solid var(--line);
+  }
+  .sheet h3{
+    margin:0;font-size:12.5px;font-weight:600;color:var(--ink-2);
+    padding-top:12px;border-top:1px solid var(--line);
+  }
+  .field{display:flex;flex-direction:column;gap:6px;}
+  .field > label{font-size:12.5px;color:var(--ink-2);}
+  input[type=number],input[type=text]{
+    width:100%;padding:7px 9px;border:1px solid var(--line-2);border-radius:var(--r-sm);
+    font-family:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+  }
+  .check{
+    display:flex;align-items:center;gap:7px;margin-top:2px;
+    font-size:12.5px;color:var(--ink-2);cursor:pointer;
+  }
+  .check input{width:14px;height:14px;accent-color:var(--ink);cursor:pointer;}
+  input:focus{outline:none;border-color:var(--ink);}
+  .row{display:flex;gap:8px;}
+  .row .field{flex:1;}
+  .row.btns button{flex:1;justify-content:center;}
+  .hint{margin:0;font-size:11.5px;color:var(--ink-3);line-height:1.6;}
+
+  /* 인쇄 : 오른쪽 창으로 (버튼 옆 드롭다운이 아니라) */
+  .menu-wrap{display:contents;}
+  .menu{
+    position:fixed;top:0;right:0;z-index:45;width:420px;max-width:100%;height:100%;
+    padding:16px;background:var(--surface);
+    border-left:1px solid var(--line-2);box-shadow:-8px 0 24px rgba(0,0,0,.10);
+    display:flex;flex-direction:column;gap:6px;overflow-y:auto;
+  }
+  .menu::before{
+    content:"인쇄";font-size:15px;font-weight:600;color:var(--ink);
+    padding-bottom:10px;margin-bottom:4px;border-bottom:1px solid var(--line);
+  }
+  .menu button{
+    width:100%;height:auto;text-align:left;justify-content:flex-start;
+    border:1px solid var(--line-2);background:var(--surface);border-radius:var(--r-md);
+    padding:11px 12px;font-size:13.5px;font-weight:500;line-height:1.35;
+    flex-direction:column;align-items:flex-start;gap:2px;
+  }
+  .menu button:hover{background:#f5f5f5;border-color:var(--ink-3);}
+  .menu button small{font-size:11.5px;font-weight:400;color:var(--ink-3);}
+
+  /* ── TV 화면 (?tv=1) : 자리표만 크게 ── */
+  body.tv .topbar,body.tv .legend,body.tv .warn,body.tv .mode-note,
+  body.tv .backdrop,body.tv .menu,body.tv .toast{display:none !important;}
+  body.tv .stage{padding:16px 20px 20px;}
+  body.tv .chart-title{font-size:26px;}
+  /* 고정·교환 표시는 선생님용이라 TV 에서는 뺀다 (인쇄와 같은 모양) */
+  body.tv .seat{
+    background:#fff !important;border-color:var(--line-2) !important;
+    border-style:solid !important;box-shadow:none !important;
+  }
+  body.tv .seat .nm{color:var(--ink) !important;}
+  body.tv .seat .mark{display:none;}
+
+  /* 이전 배치 기록 목록 */
+  .hist-list{
+    flex:none;max-height:200px;overflow-y:auto;
+    border:1px solid var(--line);border-radius:var(--r-md);
+    display:flex;flex-direction:column;
+  }
+  .hist-list .empty{padding:14px;text-align:center;color:var(--ink-3);font-size:12px;}
+  .hist-row{
+    flex:none;display:flex;align-items:center;gap:7px;padding:8px 9px;font-size:12px;
+    border-bottom:1px solid var(--line);
+  }
+  .hist-row:last-child{border-bottom:none;}
+  .hist-row:hover{background:#fafafa;}
+  .hist-row .no{flex:none;width:44px;font-weight:600;color:var(--ink);}
+  .hist-row .when{flex:1;min-width:0;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .hist-row .mix{flex:none;color:var(--ink-3);font-size:11px;}
+  .hist-row button{
+    flex:none;height:26px;padding:0 9px;font-size:11.5px;border-radius:var(--r-md);
+    color:var(--danger);border-color:#e3c3c1;
+  }
+  .hist-row button:hover{background:#fdf6f5;}
+  .hist-row button.load{color:var(--ink);border-color:var(--line-2);}
+  .hist-row button.load:hover{background:#f0f0f0;}
+
+  .file-state{
+    font-size:12.5px;color:var(--ink);background:#fafafa;
+    border:1px solid var(--line);border-radius:var(--r-md);padding:9px 11px;line-height:1.5;
+    white-space:pre-line;word-break:break-all;
+  }
+  .warn{
+    display:none;font-size:12px;line-height:1.6;color:#8a4b12;background:#fdf6ec;
+    border:1px solid #ecd9bd;border-radius:var(--r-md);padding:9px 11px;
+  }
+  .warn.on{display:block;}
+
+  .toast{
+    position:fixed;left:50%;bottom:24px;transform:translate(-50%,10px);z-index:80;
+    background:var(--ink);color:#fff;font-size:13px;font-weight:500;line-height:1.5;
+    padding:11px 18px;border-radius:var(--r-md);max-width:90vw;text-align:center;
+    opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;
+  }
+  .toast.on{opacity:1;transform:translate(-50%,0);}
+
+  @media (max-width:980px){
+    .topbar{padding:0 10px;gap:6px;}
+    .placed-date{font-size:12px;}
+    button{padding:0 10px;font-size:12px;}
+    .chip-btn{max-width:120px;}
+    .chart-title{font-size:15px;}
+    .stage{padding:8px 10px;}
+    .sheet,.menu{width:100%;}
+  }
+
+  /* ── 인쇄 / PDF ───────────────────────────── */
+  @page{size:A4 landscape;margin:5mm;}
+  @media print{
+    /* 인쇄에서는 애니메이션·트랜지션을 모두 끈다.
+       남아 있으면 요소가 합성 레이어로 처리돼 글자가 벡터가 아닌 이미지로 인쇄된다.
+       그림자도 전부 제거한다. .seat 만 지우면 특이도가 더 높은 .seat:hover 가 이겨서,
+       마우스가 올라간 자리의 그림자가 그대로 인쇄된다. */
+    *,*::before,*::after{
+      animation:none !important;transition:none !important;box-shadow:none !important;
+    }
+    html,body{height:auto;overflow:visible;background:#fff;}
+    .app{height:auto;}
+    .topbar,.legend,.backdrop,.menu,.toast,.mode-note{display:none !important;}
+    /* 좌우 여백을 조금 둔다. 폭을 100% 로 꽉 채우면 반올림 때문에
+       바깥쪽 테두리가 페이지 경계에 걸려 왼쪽 끝이 잘려 나온다. */
+    .stage{padding:0 2mm;gap:7px;height:auto;}
+    .area{display:block;}
+    .board{width:100%;gap:5mm !important;--nm:20pt !important;--no:14pt !important;}
+    /* 좌석 2.5칸 폭 : 화면에서 보이는 비율과 같게 맞춘다. */
+    .podium-bar{
+      width:41% !important;min-width:50mm;height:auto !important;margin-left:0;
+      padding:2.5mm 0;letter-spacing:.2em;color:var(--ink);border-color:#999;
+    }
+    .chart-title{font-size:20pt;font-weight:600;}
+    .grid{
+      width:100% !important;max-width:none;
+      grid-template-columns:8mm repeat(var(--pairs),minmax(0,1fr)) !important;
+      row-gap:9px !important;column-gap:16px !important;   /* 분단 사이 */
+    }
+    .colh,.rowh{font-size:9pt;color:#777;}
+    .pair{gap:5px !important;padding:0 !important;background:none !important;}
+    .seat{background:#fff !important;border:1px solid #999 !important;border-style:solid !important;}
+    .seat .nm{color:var(--ink) !important;}
+    .seat .no{color:#555 !important;}
+    .seat .mark{display:none;}
+    /* 교탁용 : 자리 위치는 그대로 두고 칸 안의 글씨만 180° 돌린다.
+       제목은 맨 아래로 내려 뒤집는다. 종이를 반 바퀴 돌리면
+       제목이 위로 오고 교탁이 아래(=선생님 쪽)에 놓이면서 모두 바로 읽힌다. */
+    body.podium .seat,
+    body.podium .podium-bar,
+    body.podium .colh,body.podium .rowh{transform:rotate(180deg);}
+    body.podium .chart-title{order:2;transform:rotate(180deg);}
+  }
+
+  /* ── 시안에 맞춘 것들 ── */
+  .meta{
+    flex:none;height:36px;display:flex;align-items:center;gap:10px;padding:0 14px;
+    background:#f2f2f2;border-bottom:1px solid var(--line);
+    font-size:13px;color:var(--ink-2);
+  }
+  .meta .stats{display:flex;gap:15px;font-variant-numeric:tabular-nums;}
+  .meta .stats i{font-style:normal;color:var(--ink-3);}
+
+  /* 자리표 이름은 상단 바 가운데(교탁과 같은 세로선)에 둔다.
+     배치도 위의 제목은 인쇄와 그림 복사용으로 남긴다. */
+  .topbar{position:relative;}
+  .chart-name{
+    position:absolute;left:calc(50% + var(--board-shift,0px));top:50%;
+    transform:translate(-50%,-50%);pointer-events:none;
+    font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--ink);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;
+  }
+  /* 좁은 화면에서는 가운데에 두면 양옆 버튼과 겹친다 → 날짜 옆으로 */
+  @media (max-width:1180px){
+    .chart-name{position:static;transform:none;pointer-events:auto;max-width:200px;}
+  }
+  .chart-title{display:none;}
+  body.shooting .chart-title{display:block;}
+
+  /* 짝꿍 뒤의 회색 판은 시안에 없다 — 칸 사이 간격만 둔다 */
+  .pair{padding:0;background:none;border-radius:0;}
+
+  /* 교탁 : 좁고 작게 */
+  .podium-bar{
+    font-size:calc(var(--no,12.5px) * .95);font-weight:500;letter-spacing:.1em;
+    color:var(--ink-2);
+  }
+
+  /* 아래 설명 줄 */
+  .legend{gap:18px;font-size:12px;color:var(--ink-3);}
+
+  /* 확정은 이 화면에서 가장 중요한 한 가지 → 파랑 */
+  #confirmBtn{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  #confirmBtn:hover{background:#0b87e3;}
+  #confirmBtn:disabled{background:var(--surface);border-color:var(--line-2);color:var(--ink-3);opacity:1;}
+  #confirmBtn:disabled:hover{background:var(--surface);}
+
+  /* 자리 높이는 fit() 이 재서 넣는다. 인쇄에서는 비율로 돌아간다. */
+  @media screen{ .seat{height:var(--cardh,auto);aspect-ratio:auto;} }
+  @media print{ .seat{height:auto !important;aspect-ratio:1.62/1;} }
+  .placed-date .suffix{margin-left:4px;color:var(--ink-2);}
+
+  /* ── 오른쪽 패널 : 청소 역할 페이지와 같은 모양 (추가 설정 · 인쇄) ── */
+  .side{
+    position:fixed;right:0;top:84px;bottom:0;width:420px;max-width:100%;z-index:50;
+    display:flex;flex-direction:column;
+    background:var(--surface);border-left:1px solid #dcdcdc;
+    box-shadow:-10px 0 30px rgba(0,0,0,.10);
+  }
+  .side > header{
+    flex:none;height:44px;display:flex;align-items:center;padding:0 14px;
+    background:var(--surface);border-bottom:1px solid var(--line);font-size:14px;font-weight:600;
+  }
+  .side > header .x{
+    margin-left:auto;height:auto;border:none;background:transparent;color:var(--ink-3);
+    padding:3px;cursor:pointer;
+  }
+  .side > header .x:hover{color:var(--ink);background:transparent;}
+  .side-body{flex:1;min-height:0;overflow-y:auto;}
+  .sect{border-bottom:1px solid var(--line);padding:13px 14px;display:flex;flex-direction:column;gap:9px;}
+  .sect:last-child{border-bottom:none;}
+  .sect > h4{margin:0;font-size:12px;font-weight:600;letter-spacing:.03em;color:var(--ink-3);}
+  .side .row{display:flex;align-items:center;gap:9px;font-size:13px;}
+  .side .row label{color:var(--ink-2);width:72px;flex:none;font-size:13px;}
+  .side .row input{
+    flex:1;min-width:0;width:auto;height:30px;padding:0 9px;font-family:inherit;font-size:13px;color:var(--ink);
+    border:1px solid var(--line-2);border-radius:var(--r-sm);background:var(--surface);
+  }
+  .side .row input:focus{outline:none;border-color:var(--accent);}
+  .side .row.btns{gap:7px;}
+  .side .row.btns button{flex:1;justify-content:center;}
+  .side .check{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2);cursor:pointer;margin:0;}
+  .side .check input{width:14px;height:14px;accent-color:var(--ink);}
+  .side button.danger{color:#b3261e;border-color:#e3b6b2;}
+  .side button.danger:hover{background:#fdf6f5;}
+  .side .warn{margin:0;}
+  .file-note{margin:0;font-size:11.5px;color:var(--ink-3);line-height:1.6;}
+  .file-note:empty{display:none;}
+
+  /* 이전 배치 목록 — 청소 역할의 배정 기록과 같은 줄 모양 */
+  .side .hist-list{
+    display:flex;flex-direction:column;max-height:200px;overflow-y:auto;
+    border:1px solid var(--line);border-radius:var(--r-md);
+  }
+  .side .hist-row{
+    display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:12px;
+    border-bottom:1px solid #f2f2f2;
+  }
+  .side .hist-row:last-child{border-bottom:none;}
+  .side .hist-row:hover{background:#fafafa;}
+  .side .hist-row .no{flex:none;width:58px;font-weight:600;color:var(--ink);}
+  .side .hist-row .when{flex:1;min-width:0;color:var(--ink-2);}
+  .side .hist-row .mix{flex:none;color:var(--ink-3);font-size:11.5px;}
+  .side .hist-row button{height:26px;padding:0 9px;font-size:11.5px;border-radius:var(--r-md);}
+
+  /* 인쇄 항목 */
+  .pitems{display:flex;flex-direction:column;gap:6px;}
+  .pitem{
+    display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;height:auto;
+    padding:13px 14px;text-align:left;cursor:pointer;
+    border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--surface);
+  }
+  .pitem:hover{background:#f5f5f5;border-color:var(--ink-3);}
+  .pitem b{font-size:13px;font-weight:600;}
+  .pitem span{font-size:11.5px;color:var(--ink-3);font-weight:400;}
+
+  body.tv .side{display:none !important;}
+  @media print{ .side{display:none !important;} }
+  @media (max-width:980px){ .side{width:100%;} }
+
+  /* TV : 현황 줄은 선생님용이라 뺀다. 자리표 제목은 상단 바 대신 배치도 위에 크게 */
+  body.tv .meta{display:none !important;}
+  body.tv .chart-title{display:block;}
+
+  /* 인쇄 : 현황 줄은 종이에 맞게 담백하게. 교탁용은 제목처럼 아래로 내려 뒤집는다
+     (종이를 반 바퀴 돌리면 맨 위로 와서 바로 읽힌다) */
+  @media print{
+    .meta{
+      height:auto;background:none;border:none;justify-content:center;
+      padding:0 2mm 2mm;font-size:10pt;color:#555;
+    }
+    .meta .stats i{color:#555;}
+    body.podium .meta{order:3;transform:rotate(180deg);padding:2mm 2mm 0;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="left">
+      <div class="pager">
+        <button class="on">자리 배치</button>
+        <button id="toCleaning">청소 역할</button>
+        <button id="toCheck">청소 체크</button>
+      </div>
+      <div class="sep"></div>
+      <button class="chip-btn" id="fileChip" title="저장 파일 상태"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span class="label">저장 파일 연결</span></button>
+      <span class="placed-date" id="placedDate"></span>
+      <span class="chart-name" id="chartName"></span>
+    </div>
+    <div class="tools">
+      <button class="quiet icon" id="tvBtn" hidden title="TV 전환"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+      <button class="quiet icon" id="printBtn" aria-haspopup="true" aria-expanded="false" title="인쇄"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg></button>
+      <button class="quiet icon" id="settings" title="추가 설정"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.6 3.09V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 16 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 20.4 9v.09a1.65 1.65 0 0 0 1.51 1.51H22a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <div class="sep"></div>
+      <button class="done" id="doneEdit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>이름 입력 완료</button>
+      <button id="shuffle"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>랜덤 배치</button>
+      <button class="primary" id="confirmBtn" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>확정</button>
+    </div>
+  </header>
+
+  <div class="meta"><div class="stats" id="count"></div></div>
+
+  <main class="stage">
+    <div class="mode-note" id="draftTag" hidden>미확정 — <b>확정</b> 을 눌러야 저장됩니다</div>
+    <div class="chart-title" id="chartTitle">1-4 자리배치도</div>
+    <div class="area" id="area">
+      <div class="board" id="board">
+        <div class="podium-bar" id="podiumBar">교탁</div>
+        <div class="grid" id="grid"></div>
+      </div>
+    </div>
+    <div class="legend" id="legend">
+      <span>누르면 고정</span>
+      <span>끌면 자리 바꾸기</span>
+      <span>고정 = 진한 테두리 · 손으로 바꿈 = 점선</span>
+    </div>
+    <div class="legend" id="editLegend" hidden>
+      <span class="edit-tip">자리를 눌러 이름을 입력하세요</span>
+      <span>Tab · Enter = 다음 자리</span>
+      <span>비워 두면 빈 자리</span>
+      <span><code>7 김수훈</code> 처럼 쓰면 번호 지정</span>
+    </div>
+  </main>
+
+</div>
+
+<aside class="side" id="backdrop" hidden aria-label="추가 설정">
+  <header>추가 설정
+    <button class="x" id="close" title="닫기"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </header>
+  <div class="side-body">
+
+    <div class="sect">
+      <h4>자리표 이름</h4>
+      <div class="row"><input type="text" id="titleInput" value="1-4 자리배치도" maxlength="40" autocomplete="off" placeholder="예) 1-4 자리배치도"></div>
+      <label class="check"><input type="checkbox" id="titleShow" checked> 인쇄·그림에 제목 넣기</label>
+    </div>
+
+    <div class="sect">
+      <h4>자리 수</h4>
+      <div class="row"><label for="rows">줄</label><input type="number" id="rows" min="1" max="12" value="5"></div>
+      <div class="row"><label for="cols">한 줄 인원</label><input type="number" id="cols" min="1" max="12" value="6"></div>
+      <div id="warn" class="warn"></div>
+    </div>
+
+    <div class="sect">
+      <h4>역할</h4>
+      <div class="row"><label for="roleA">회장</label><input type="text" id="roleA" list="nameList" placeholder="학생 이름" autocomplete="off" maxlength="20"></div>
+      <div class="row"><label for="roleB">부회장</label><input type="text" id="roleB" list="nameList" placeholder="학생 이름" autocomplete="off" maxlength="20"></div>
+      <datalist id="nameList"></datalist>
+    </div>
+
+    <div class="sect">
+      <h4>이름 · 번호</h4>
+      <div class="row btns"><button id="renameStart">이름 바꾸기</button><button id="renumber">가나다순 번호</button></div>
+      <div class="row btns"><button id="clearSwap">교환 표시 지우기</button></div>
+    </div>
+
+    <div class="sect">
+      <h4>이전 배치</h4>
+      <div class="hist-list" id="histList"></div>
+      <div class="row btns"><button class="danger" id="clearHist">기록 전체 지우기</button></div>
+    </div>
+
+    <div class="sect">
+      <h4>저장 파일</h4>
+      <div class="file-state" id="fileState">저장 파일이 연결되지 않았습니다.</div>
+      <div class="row btns" id="fsButtons"><button id="fileNew">저장 파일 만들기</button><button id="fileOpen">저장 파일 열기</button></div>
+      <div class="row btns" id="dlButtons" hidden><button id="fileExport">파일로 내보내기</button><button id="fileImport">파일 불러오기</button></div>
+      <p class="file-note" id="fileHint"></p>
+    </div>
+
+  </div>
+</aside>
+
+<aside class="side" id="printMenu" hidden aria-label="인쇄">
+  <header>인쇄
+    <button class="x" id="printClose" title="닫기"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </header>
+  <div class="side-body">
+    <div class="sect">
+      <div class="pitems">
+        <button class="pitem" data-print="normal"><b>일반 인쇄</b></button>
+        <button class="pitem" data-print="podium"><b>교탁용 인쇄</b></button>
+        <button class="pitem" data-print="pdf"><b>PDF로 저장</b></button>
+        <button class="pitem" data-print="copy"><b>그림으로 복사</b></button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<input type="file" id="filePicker" accept=".json,application/json" hidden>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  const DEFAULT_NAMES = [
+    "고희성","곽현진","김건우","김나연","김도윤","김서윤","김수훈","나윤아","류경민","박시우",
+    "박유찬","박진서","방재원","손지원","신동화","신의진","양하준","오승후","유하람","이민제",
+    "이유진","이준서","이지환","정현우","차예린","최민영","최성빈","최정우","현태윤","홍의준"
+  ];
+  const DEFAULT_ROLES = { "신의진":"회장", "최정우":"부회장" };
+
+  const CACHE_KEY = "seating-chart-cache";   // 파일이 없을 때를 대비한 예비 저장
+  const FILE_NAME   = "data.json";     // 브라우저에서 직접 열었을 때 쓰는 내보내기 파일
+  const SERVER_NAME = "data.sqlite";   // start.bat 으로 켰을 때 서버가 쓰는 데이터베이스
+  // start.bat 으로 켜면 http 로 열린다. 이때는 서버가 data.json 을 직접 읽고 써 준다.
+  const SERVER = location.protocol === "http:" || location.protocol === "https:";
+  const NUM_RE = /^(\d{1,3})\s*[.)번]?\s+(.+)$/;   // "7 김수훈" / "7. 김수훈" / "7번 김수훈"
+  const $ = id => document.getElementById(id);
+  const els = {
+    rows:$("rows"), cols:$("cols"),
+    chartTitle:$("chartTitle"), titleInput:$("titleInput"), titleShow:$("titleShow"),
+    grid:$("grid"), area:$("area"), board:$("board"), podiumBar:$("podiumBar"),
+    warn:$("warn"), count:$("count"), toast:$("toast"),
+    legend:$("legend"), editLegend:$("editLegend"),
+    renameStart:$("renameStart"), doneEdit:$("doneEdit"), shuffle:$("shuffle"),
+    printBtn:$("printBtn"), printMenu:$("printMenu"),
+    toCleaning:$("toCleaning"), toCheck:$("toCheck"), placedDate:$("placedDate"),
+    settings:$("settings"), backdrop:$("backdrop"), close:$("close"),
+    renumber:$("renumber"), clearSwap:$("clearSwap"),
+    histList:$("histList"), clearHist:$("clearHist"), tvBtn:$("tvBtn"),
+    confirmBtn:$("confirmBtn"), draftTag:$("draftTag"),
+    roleA:$("roleA"), roleB:$("roleB"), nameList:$("nameList"),
+    fileChip:$("fileChip"), fileState:$("fileState"), fileHint:$("fileHint"),
+    fsButtons:$("fsButtons"), dlButtons:$("dlButtons"),
+    fileNew:$("fileNew"), fileOpen:$("fileOpen"),
+    fileExport:$("fileExport"), fileImport:$("fileImport"), filePicker:$("filePicker")
+  };
+
+  // students[] = {no, name} 명단 (번호 순)
+  // seats[i]   = 좌석 i 에 앉은 학생 인덱스 (없으면 null)
+  // base[i]    = 마지막 랜덤 배치 직후의 자리 → 이것과 다를 때만 '교환됨(보라)'
+  // locked[i]  = 고정석
+  // lockWho[i] = 고정할 때 그 자리에 있던 학생 인덱스 (빈자리를 고정했으면 null)
+  //              → 고정은 '자리 + 사람' 으로 기억한다. 자리만 기억하면 확정 전 배치에서
+  //                고정한 뒤 다시 열었을 때 확정본의 다른 학생이 그 자리에 고정돼 버린다.
+  let students = [], seats = [], base = [], locked = [], lockWho = [], cells = [];
+  let busy = false, editing = false;
+
+  function renderTitle(){
+    els.chartTitle.textContent = els.titleInput.value;
+    els.chartTitle.hidden = !els.titleShow.checked;
+    // 화면에서는 상단 바에 보인다 (배치도 위의 제목은 인쇄·그림 복사용)
+    const nm = document.getElementById("chartName");
+    if(nm) nm.textContent = els.titleInput.value;   // 상단 바 이름은 늘 보인다
+    fit();                                    // 제목이 사라지면 배치도가 그만큼 커진다
+  }
+
+  const clamp = (v, lo, hi, dflt) =>
+    Number.isFinite(+v) ? Math.min(hi, Math.max(lo, Math.round(+v))) : dflt;
+  const seatCount = () => (+els.rows.value || 1) * (+els.cols.value || 1);
+
+  /* ── 상태 읽기 / 쓰기 ──────────────────────── */
+  // 저장 파일은 청소 페이지와 함께 쓴다. 이 페이지가 모르는 항목(cleaning 등)은
+  // 그대로 보관했다가 다시 써 준다. 안 그러면 저장할 때마다 상대 페이지 데이터가 지워진다.
+  const MINE = ["v","savedAt","placedAt","title","showTitle","rows","cols","students","seats","base","locked","lockWho","names","seatHistory"];
+  let extra = {};
+  let placedAt = "";                       // 마지막으로 자리를 뽑은 시각
+  let seatHistory = [];                    // 이전 배치 기록 (최신이 앞, 최대 10개)
+  const HIST_MAX = 10;
+
+  /* ── 확정 전에는 저장하지 않는다 ──────────────
+     랜덤 배치·드래그로 자리를 바꾸는 동안은 화면만 바뀌고, 파일에는 마지막으로
+     확정한 자리·기준·기록·날짜가 그대로 남는다 (청소 역할 페이지와 같은 방식).
+     고정(locked)은 예외 — 배치와 무관하게 그때그때 바로 저장된다. */
+  let dirty = false, committed = null;
+  const grabAssign = () => JSON.parse(JSON.stringify({ seats, base, placedAt, seatHistory }));
+  function markDirty(){ dirty = true; updateConfirm(); save(); }
+
+  // 지금 화면 그대로의 상태 (확정 전 배치 포함) — TV 로 보낼 때 쓴다
+  function liveData(){
+    return Object.assign({}, extra, {
+      v:3, savedAt:new Date().toISOString(), placedAt, seatHistory,
+      title:els.titleInput.value, showTitle:els.titleShow.checked,
+      rows:+els.rows.value, cols:+els.cols.value,
+      students, seats, base, locked, lockWho
+    });
+  }
+  function snapshot(){
+    const data = liveData();
+    // 확정(✓ 확정)을 누르기 전에는 화면만 바뀐다 — 파일에는 마지막으로 확정된
+    // 자리·기준·기록·날짜가 그대로 남는다.
+    if(!(dirty && committed)) return data;
+    // 고정은 바로 저장되므로, 확정본에서도 고정한 학생이 고정한 자리에 앉아 있게 맞춘다
+    const c = JSON.parse(JSON.stringify(committed));
+    if(c.seats.length === locked.length){ enforceLocks(c.seats); enforceLocks(c.base); }
+    return Object.assign(data, c);
+  }
+
+  // TV 에 지금 화면을 보낸다. 파일은 확정본이라 TV 가 파일만 읽으면 확정 전 배치가 안 보인다.
+  var liveAt = 0;                            // (TV) 노트북 화면을 마지막으로 받은 시각
+  function tvSend(){
+    if(TV || !TV_CH) return;
+    try{ TV_CH.postMessage({ cmd:"state", page:"seating", data:liveData() }); }catch(e){}
+  }
+
+  function apply(d){
+    if(!d || typeof d !== "object") return false;
+    extra = {};
+    for(const k in d) if(!MINE.includes(k)) extra[k] = d[k];
+    // placedAt 이 생기기 전에 저장된 파일은 마지막 저장 시각을 배치 날짜로 본다 (한 번만)
+    placedAt = typeof d.placedAt === "string" && d.placedAt ? d.placedAt
+             : (typeof d.savedAt === "string" ? d.savedAt : "");
+    seatHistory = (Array.isArray(d.seatHistory) ? d.seatHistory : [])
+      .filter(h => h && Array.isArray(h.seats))
+      .map(h => ({ at:String(h.at || ""), rows:clamp(h.rows, 1, 12, 5),
+                   cols:clamp(h.cols, 1, 12, 6),
+                   seats:h.seats.map(n => Number.isFinite(+n) ? +n : null) }))
+      .slice(0, HIST_MAX);
+    els.titleInput.value = d.title || "1-4 자리배치도";
+    els.titleShow.checked = d.showTitle !== false;   // 예전 저장 파일은 표시로 본다
+    renderTitle();
+    els.rows.value  = clamp(d.rows, 1, 12, 5);
+    els.cols.value  = clamp(d.cols, 1, 12, 6);
+
+    if(Array.isArray(d.students)){
+      students = d.students
+        .filter(s => s && typeof s.name === "string" && s.name.trim())
+        .map(s => {
+          const out = { no:clamp(s.no, 1, 999, 0) || 0, name:s.name.trim() };
+          if(typeof s.role === "string" && s.role.trim()) out.role = s.role.trim();
+          return out;
+        });
+      numberAll();
+    }else if(typeof d.names === "string"){         // 예전 저장 형식 (줄바꿈 텍스트)
+      students = parseNameText(d.names);
+    }else{
+      return false;
+    }
+
+    const n = seatCount();
+    const valid = v => (Number.isInteger(v) && v >= 0 && v < students.length) ? v : null;
+    if(Array.isArray(d.seats) && d.seats.length === n){
+      seats  = d.seats.map(valid);
+      base   = Array.isArray(d.base) && d.base.length === n ? d.base.map(valid) : seats.slice();
+      locked = fitFlags(d.locked, n);
+      // lockWho 가 없던 예전 파일은 지금 그 자리에 있는 학생을 고정한 것으로 본다
+      lockWho = Array.isArray(d.lockWho) && d.lockWho.length === n
+        ? d.lockWho.map(valid) : seats.slice();
+      tidyLocks();
+      enforceLocks(seats); enforceLocks(base);
+    }else{
+      resetSeats(); fillInOrder();
+    }
+    dirty = false;
+    committed = grabAssign();                 // 방금 읽은 상태가 곧 '확정된' 상태다
+    return true;
+  }
+
+  function parseNameText(text){
+    const list = [];
+    for(const raw of String(text).split(/[\n,]/)){
+      const line = raw.trim();
+      if(!line) continue;
+      const m = line.match(NUM_RE);
+      list.push(m ? { no:+m[1], name:m[2].trim() } : { no:0, name:line });
+    }
+    const out = list.map(s => ({ no:s.no, name:s.name }));
+    students = out;
+    numberAll();
+    return students;
+  }
+
+  // 번호가 없거나(0) 겹치는 학생에게 비어 있는 번호를 채워 준다
+  function numberAll(){
+    const taken = new Set();
+    for(const s of students){
+      if(s.no && !taken.has(s.no)) taken.add(s.no);
+      else s.no = 0;
+    }
+    let next = 1;
+    for(const s of students){
+      if(s.no) continue;
+      while(taken.has(next)) next++;
+      s.no = next; taken.add(next);
+    }
+  }
+
+  function fitFlags(arr, n){
+    const out = (Array.isArray(arr) ? arr : []).slice(0, n).map(Boolean);
+    while(out.length < n) out.push(false);
+    return out;
+  }
+
+  // 고정 정보 정리 : 고정 안 된 자리는 사람을 비우고, 한 학생이 두 자리에 고정돼 있지 않게
+  function tidyLocks(){
+    const n = locked.length, seen = new Set();
+    lockWho = lockWho.slice(0, n);
+    while(lockWho.length < n) lockWho.push(null);
+    for(let i=0;i<n;i++){
+      const s = lockWho[i];
+      if(!locked[i] || s == null || s < 0 || s >= students.length || seen.has(s)) lockWho[i] = null;
+      else seen.add(s);
+    }
+  }
+
+  // 고정된 학생을 고정한 자리로 되돌린다 (그 자리에 있던 학생과 맞바꾼다)
+  function enforceLocks(arr){
+    if(!Array.isArray(arr) || arr.length !== locked.length) return arr;
+    for(let i=0;i<arr.length;i++){
+      const s = lockWho[i];
+      if(!locked[i] || s == null || arr[i] === s) continue;
+      const j = arr.indexOf(s);
+      if(j >= 0){ arr[j] = arr[i]; arr[i] = s; continue; }
+      // 그 학생이 자리에 없었다 → 앉히고, 원래 있던 학생은 고정 안 된 빈자리로
+      const out = arr[i];
+      arr[i] = s;
+      if(out != null){
+        const k = arr.findIndex((v, x) => v == null && !locked[x]);
+        if(k >= 0) arr[k] = out;
+      }
+    }
+    return arr;
+  }
+
+  /* ── 이전 배치 기록 ────────────────────────── */
+  // 좌석에는 명단 위치가 들어 있지만, 기록에는 학생 '번호' 로 남긴다.
+  // 그래야 나중에 이름 목록 순서가 바뀌어도 제자리를 찾아간다.
+  // 손으로 바꾼 자리가 있는지 (보라색 표시가 하나라도 있으면 확정할 것이 있다)
+  function hasMoved(){
+    for(let i = 0; i < seats.length; i++)
+      if(seats[i] != null && base[i] != null && seats[i] !== base[i]) return true;
+    return false;
+  }
+  function updateConfirm(){
+    if(!els.confirmBtn) return;
+    const on = !busy && !editing && dirty;
+    els.confirmBtn.disabled = !on;
+    els.confirmBtn.title = on
+      ? "지금 배치를 이대로 저장하고 기록에 남깁니다"
+      : "랜덤 배치를 하거나 자리를 바꾸면 확정할 수 있습니다";
+    if(els.draftTag) els.draftTag.hidden = !dirty;
+  }
+
+  // 지금 화면의 배치를 기준으로 삼고 기록에 남긴다
+  function confirmSeats(){
+    if(busy || editing || !dirty) return;
+    base = seats.slice();                        // 보라색 표시가 사라진다
+    placedAt = new Date().toISOString();         // 상단 날짜도 오늘로
+    pushHistory();                               // '이전 배치' 목록에 남는다
+    dirty = false;
+    committed = grabAssign();                    // 지금 상태가 새 확정본이 된다
+    paint(); save();
+    toast("지금 배치를 확정했습니다. 기록에도 남았습니다.", 4000);
+  }
+
+  function pushHistory(){
+    const list = seats.map(i => (i != null && students[i]) ? students[i].no : null);
+    if(!list.some(v => v != null)) return;             // 빈 배치는 남기지 않는다
+    seatHistory.unshift({
+      at:new Date().toISOString(),
+      rows:+els.rows.value || 5, cols:+els.cols.value || 6,
+      seats:list
+    });
+    seatHistory = seatHistory.slice(0, HIST_MAX);
+  }
+
+  // 기록에 남은 자리를 그대로 되살린다
+  function loadSeatHistory(k){
+    const h = seatHistory[k];
+    if(!h || busy) return;
+
+    // 줄·칸이 달랐다면 그때의 배치대로 맞춰 준다
+    if((+els.rows.value !== h.rows) || (+els.cols.value !== h.cols)){
+      els.rows.value = h.rows;
+      els.cols.value = h.cols;
+    }
+    const n = h.rows * h.cols;
+    const idxOf = new Map(students.map((st, i) => [st.no, i]));
+    const next = new Array(n).fill(null);
+    let 빠짐 = 0;
+    h.seats.forEach((no, i) => {
+      if(no == null || i >= n) return;
+      if(idxOf.has(no)) next[i] = idxOf.get(no);
+      else 빠짐++;                                      // 명단에서 없어진 학생
+    });
+
+    seats = next;
+    locked = fitFlags(locked, n);
+    tidyLocks();
+    enforceLocks(seats);                               // 고정한 학생은 고정한 자리에 그대로
+    base = seats.slice();                              // 되살린 배치가 기준 → 교환 표시 없음
+    placedAt = h.at;                                   // 화면엔 그때 날짜로 보인다 (저장은 확정 후)
+    buildGrid();
+    markDirty();
+    closeSheet();
+    const 몇 = k === 0 ? "직전" : `${k}회 전`;
+    toast(빠짐 ? `${몇} 배치를 불러왔습니다. ${빠짐}명은 명단에 없어 빈자리가 됐습니다.`
+               : `${몇} 배치를 불러왔습니다.`, 4500);
+  }
+
+  function renderHistList(){
+    if(!seatHistory.length){
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "랜덤 배치를 하면 기록이 쌓입니다";
+      els.histList.replaceChildren(e);
+      return;
+    }
+    els.histList.replaceChildren(...seatHistory.map((h, i) => {
+      const row = document.createElement("div");
+      row.className = "hist-row";
+
+      const no = document.createElement("span");
+      no.className = "no";
+      no.textContent = i === 0 ? "직전" : `${i}회 전`;
+
+      const when = document.createElement("span");
+      when.className = "when";
+      const d = new Date(h.at);
+      when.textContent = isNaN(d) ? "(시각 없음)"
+        : `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} ` +
+          `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+
+      const mix = document.createElement("span");
+      mix.className = "mix";
+      mix.textContent = `${h.seats.filter(v => v != null).length}명 · ${h.rows}×${h.cols}`;
+
+      const load = document.createElement("button");
+      load.className = "load";
+      load.textContent = "불러오기";
+      load.title = "이 배치로 되돌립니다";
+      load.addEventListener("click", () => loadSeatHistory(i));
+
+      const del = document.createElement("button");
+      del.textContent = "지우기";
+      del.title = "이 회차만 기록에서 지웁니다";
+      del.addEventListener("click", () => {
+        seatHistory.splice(i, 1);
+        renderHistList(); save();
+        toast(`${no.textContent} 기록을 지웠습니다. 남은 기록 ${seatHistory.length}회.`);
+      });
+
+      row.append(no, when, mix, load, del);
+      return row;
+    }));
+  }
+
+  function resetSeats(){
+    const n = seatCount();
+    seats = new Array(n).fill(null);
+    base = new Array(n).fill(null);
+    locked = new Array(n).fill(false);
+    lockWho = new Array(n).fill(null);
+  }
+
+  function fillInOrder(){
+    const n = seatCount();
+    for(let i=0;i<n;i++) seats[i] = i < students.length ? i : null;
+    base = seats.slice();                       // 기준 배치를 새로 잡는다
+  }
+
+  let saveTimer = null;
+  function save(){
+    if(TV) return;                      // TV 화면은 보여 주기만 한다
+    // 추첨 애니메이션 중에는 저장하지 않는다. 중간 단계의 임의 배치가 기준 배치(base)와
+    // 어긋난 채 기록되면, 다시 열었을 때 좌석이 전부 '교환됨'으로 표시된다.
+    // 이 사이에 바뀐 값들은 추첨이 끝날 때의 save() 가 함께 기록한다.
+    if(busy) return;
+    needsSave = true; editVersion++;
+    try{ localStorage.setItem(CACHE_KEY, JSON.stringify(snapshot())); }catch(e){}
+    tvSend();
+    if(SERVER){
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(putServer, 350);
+      return;
+    }
+    if(!fileHandle) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(writeFile, 350);
+  }
+
+  /* ── 서버 모드 : data.json 을 직접 읽고 쓴다 ── */
+  // 저장에 실패해도 포기하지 않는다. 프로그램이 잠깐 꺼져 있었어도
+  // 다시 켜지는 순간 밀린 내용이 저장되도록 계속 다시 시도한다.
+  let retryTimer = null, saveFailed = false, needsSave = false, editVersion = 0;
+  async function putServer(){
+    clearTimeout(saveTimer); saveTimer = null;
+    clearTimeout(retryTimer);
+    const version = editVersion;
+    try{
+      const r = await fetch("api/data", {
+        method:"PUT",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(snapshot())
+      });
+      if(!r.ok) throw new Error(r.status);
+      tvPing();                                  // TV 화면을 새로 고치게 한다
+      if(saveFailed) toast("연결이 돌아와 밀린 내용을 저장했습니다.");
+      saveFailed = false;
+      if(version === editVersion) needsSave = false;
+      setChip("linked", needsSave ? "저장 중" : "저장됨");
+      return true;
+    }catch(e){
+      saveFailed = true;
+      setChip("attn", "저장 안 됨");
+      if(!window.classroomStorage?.blocked) retryTimer = setTimeout(putServer, 3000);
+      return false;
+    }
+  }
+  // 창으로 돌아오거나 네트워크가 살아나면 즉시 한 번 더
+  document.addEventListener("visibilitychange", () => {
+    if(!document.hidden && saveFailed) putServer();
+  });
+  window.addEventListener("online", () => { if(saveFailed) putServer(); });
+
+  async function loadServer(){
+    if(needsSave || window.classroomStorage?.pending || window.classroomStorage?.blocked) return;
+    try{
+      const r = await fetch("api/data", { cache:"no-store" });
+      if(!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      if(needsSave || window.classroomStorage?.pending) return;
+      window.classroomStorage?.acceptRead(r);
+      if(d && Object.keys(d).length && apply(d)) buildGrid();
+      setChip("linked", "자동 저장");
+      els.fileState.textContent = SERVER_NAME + " · 자동 저장";
+    }catch(e){
+      setChip("attn", "읽기 실패");
+    }
+  }
+
+  /* ── 저장 파일 (File System Access API) ────── */
+  const FS_OK = typeof window.showSaveFilePicker === "function";
+  let fileHandle = null, pendingHandle = null, writing = false, writeAgain = false;
+
+  function idb(){
+    return new Promise((res, rej) => {
+      const r = indexedDB.open("seating-chart", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function idbSet(k, v){
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const t = db.transaction("kv", "readwrite");
+      t.objectStore("kv").put(v, k);
+      t.oncomplete = res; t.onerror = () => rej(t.error);
+    });
+  }
+  async function idbGet(k){
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const t = db.transaction("kv", "readonly");
+      const q = t.objectStore("kv").get(k);
+      q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+    });
+  }
+
+  function setChip(mode, text){
+    els.fileChip.classList.toggle("linked", mode === "linked");
+    els.fileChip.classList.toggle("attn", mode === "attn");
+    els.fileChip.querySelector(".label").textContent = text;
+  }
+
+  function fileStatus(msg){
+    if(SERVER){
+      setChip("linked", msg || "자동 저장");
+      els.fileState.textContent = SERVER_NAME + " · 자동 저장";
+      return;
+    }
+    if(fileHandle){
+      setChip("linked", msg ? fileHandle.name + " · " + msg : fileHandle.name);
+      els.fileState.textContent = `연결됨 — ${fileHandle.name}`;
+    }else if(pendingHandle){
+      setChip("attn", "연결 필요");
+      els.fileState.textContent = `${pendingHandle.name} — 다시 연결 필요`;
+    }else{
+      setChip("", "저장 파일 연결");
+      els.fileState.textContent = "연결 안 됨 · 이 브라우저에만 임시 저장";
+    }
+  }
+
+  let fileWriteQueue = Promise.resolve();
+  function writeFile(){
+    const job = fileWriteQueue.then(writeFileNow);
+    fileWriteQueue = job.catch(() => {});
+    return job;
+  }
+  async function writeFileNow(){
+    if(!fileHandle) return true;
+    if(writing){ writeAgain = true; return false; }
+    writing = true;
+    try{
+      const w = await fileHandle.createWritable();
+      await w.write(JSON.stringify(snapshot(), null, 2));
+      await w.close();
+      fileStatus("저장됨");
+      return true;
+    }catch(e){
+      fileStatus("저장 실패");
+      toast("저장 파일에 쓸 수 없습니다. 파일을 다시 연결해 주세요.");
+      return false;
+    }finally{
+      writing = false;
+      if(writeAgain){ writeAgain = false; writeFile(); }
+    }
+  }
+
+  async function readFile(handle){
+    const f = await handle.getFile();
+    const txt = (await f.text()).trim();
+    if(!txt) return false;                       // 새로 만든 빈 파일
+    apply(JSON.parse(txt));
+    buildGrid();
+    return true;
+  }
+
+  async function linkNew(){
+    try{
+      const h = await window.showSaveFilePicker({
+        suggestedName: FILE_NAME,
+        types:[{ description:"자리배치 저장 파일", accept:{ "application/json":[".json"] } }]
+      });
+      fileHandle = h; pendingHandle = null;
+      await idbSet("handle", h);
+      await writeFile();
+      toast("이제 " + h.name + " 에 자동으로 저장됩니다.");
+    }catch(e){ if(e && e.name !== "AbortError") toast("저장 파일을 만들지 못했습니다."); }
+  }
+
+  async function linkOpen(){
+    try{
+      const [h] = await window.showOpenFilePicker({
+        types:[{ description:"자리배치 저장 파일", accept:{ "application/json":[".json"] } }]
+      });
+      if((await h.requestPermission({ mode:"readwrite" })) !== "granted"){
+        toast("파일 쓰기 권한이 필요합니다."); return;
+      }
+      fileHandle = h; pendingHandle = null;
+      await idbSet("handle", h);
+      const ok = await readFile(h);
+      if(!ok) await writeFile();
+      fileStatus("저장됨");
+      toast(h.name + " 을(를) 불러왔습니다.");
+    }catch(e){
+      if(e && e.name === "AbortError") return;
+      toast("파일을 읽지 못했습니다. 형식을 확인해 주세요.");
+    }
+  }
+
+  async function reconnect(){
+    if(!pendingHandle) return;
+    try{
+      if((await pendingHandle.requestPermission({ mode:"readwrite" })) !== "granted"){
+        toast("파일 접근을 허용해야 자동 저장됩니다."); return;
+      }
+      fileHandle = pendingHandle; pendingHandle = null;
+      await readFile(fileHandle);
+      fileStatus("저장됨");
+      toast(fileHandle.name + " 에 다시 연결되었습니다.");
+    }catch(e){
+      pendingHandle = null; fileStatus();
+      toast("파일에 다시 연결하지 못했습니다. ‘저장 파일 열기’로 선택해 주세요.");
+    }
+  }
+
+  async function restoreHandle(){
+    if(!FS_OK) return;
+    let h = null;
+    try{ h = await idbGet("handle"); }catch(e){}
+    if(!h) return;
+    try{
+      const p = await h.queryPermission({ mode:"readwrite" });
+      if(p === "granted"){
+        fileHandle = h;
+        await readFile(h);
+        fileStatus("저장됨");
+      }else{
+        pendingHandle = h;
+        fileStatus();
+      }
+    }catch(e){ fileStatus(); }
+  }
+
+  // File System Access API 를 못 쓰는 브라우저용 (내보내기 / 불러오기)
+  function exportFile(){
+    const blob = new Blob([JSON.stringify(snapshot(), null, 2)], { type:"application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = FILE_NAME;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  els.filePicker.addEventListener("change", () => {
+    const f = els.filePicker.files[0];
+    if(!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try{ apply(JSON.parse(r.result)); buildGrid(); save(); toast(f.name + " 을(를) 불러왔습니다."); }
+      catch(e){ toast("파일을 읽지 못했습니다. 형식을 확인해 주세요."); }
+    };
+    r.readAsText(f);
+    els.filePicker.value = "";
+  });
+
+  /* ── 그리드 만들기 / 크기 맞추기 ───────────── */
+  function buildGrid(){
+    const rows = +els.rows.value || 1, cols = +els.cols.value || 1;
+    const pairs = Math.ceil(cols / 2);                 // 한 줄에 들어가는 짝꿍 묶음 수
+    els.board.style.setProperty("--pairs", pairs);
+    els.grid.innerHTML = "";
+    cells = new Array(rows * cols);
+
+    // 첫 줄은 분단 머리글, 각 줄 맨 앞은 줄 번호 — 자리 위치를 눈으로 짚으려고 둔다
+    const lab = (cls, text) => {
+      const d = document.createElement("div");
+      d.className = cls; d.textContent = text;
+      return d;
+    };
+    els.grid.appendChild(lab("rowh", ""));                 // 왼쪽 위 빈 칸
+    for(let p = 0; p < pairs; p++) els.grid.appendChild(lab("colh", (p + 1) + "분단"));
+
+    for(let r = 0; r < rows; r++){
+      els.grid.appendChild(lab("rowh", (r + 1) + "줄"));
+      for(let p = 0; p < pairs; p++){
+        const box = document.createElement("div");
+        box.className = "pair";
+        for(let c = p * 2; c < Math.min(p * 2 + 2, cols); c++){
+          const i = r * cols + c;
+          const el = document.createElement("div");
+          el.className = "seat";
+          el.draggable = true;
+          el.dataset.i = i;
+          el.innerHTML =
+            '<span class="mark"></span><span class="nm"></span>' +
+            '<input class="ed" name="seat' + i + '" autocomplete="off" maxlength="20" ' +
+            'spellcheck="false" hidden><span class="no"></span>';
+          bindSeat(el);
+          box.appendChild(el);
+          cells[i] = el;
+        }
+        els.grid.appendChild(box);
+      }
+    }
+    paint();
+    fit();
+  }
+
+  // 화면에 꽉 차도록 좌석 크기와 글자 크기를 계산
+  function fit(){
+    const rows = +els.rows.value || 1, cols = +els.cols.value || 1;
+    const availW = els.area.clientWidth, rawH = els.area.clientHeight;
+    if(!availW || !rawH) return;
+
+    const gap = availW < 700 ? 8 : 12;                   // 줄 사이
+    const gapIn = Math.round(gap * 0.6);                 // 짝꿍 사이 (좁게)
+    const gapPr = Math.round(gap * 1.8);                 // 분단 사이 (조금만 넓게)
+    const ratio = 1.49;                                  // 좌석 가로/세로 비율 (시안과 같게)
+
+    const pairs = Math.ceil(cols / 2);
+    const wGaps = gapIn * (cols - pairs) + gapPr * (pairs - 1);   // 가로 간격 합계
+
+    // 줄 번호 칸과 분단 머리글이 차지하는 만큼을 먼저 빼 둔다
+    const labW = 34, headH = 19;
+    const sideW = labW + gapPr;
+
+    // 교탁 높이만큼 뺀 나머지에 좌석을 채운다
+    const solve = barH => {
+      // 교탁 아래 간격은 줄 간격의 55% 다 (.board 의 gap)
+      const availH = rawH - barH - headH - gap * 0.55 - gap * (rows - 1);
+      let cardH = availH / rows;
+      let cardW = Math.min(cardH * ratio, 360);
+      let w = cardW * cols + wGaps;
+      const maxW = availW - sideW;
+      if(w > maxW){
+        // 가로가 먼저 찼다 → 세로가 남는다. 그 높이를 자리에 준다
+        // (너무 정사각이 되지 않게 가로/세로 1.25 까지만)
+        w = maxW;
+        cardW = (w - wGaps) / cols;
+        cardH = Math.min(availH / rows, cardW / 1.25);
+      }
+      return {
+        cardW, cardH, w,
+        nm: Math.max(13, Math.min(52, Math.min(cardW * 0.158, cardH * 0.27))),
+      };
+    };
+
+    let barH = Math.round(Math.min(40, Math.max(24, rawH * 0.055)));
+    let L = solve(barH);
+    const need = Math.ceil(L.nm * 0.46 * 1.9);           // 교탁 글자는 번호 크기다
+    if(need > barH){ barH = need; L = solve(barH); }
+
+    els.board.style.setProperty("--gap", gap + "px");
+    els.board.style.setProperty("--gap-in", gapIn + "px");
+    els.board.style.setProperty("--gap-pair", gapPr + "px");
+    els.board.style.setProperty("--lab", labW + "px");
+    els.board.style.setProperty("--w", Math.floor(L.w + sideW) + "px");
+    els.board.style.setProperty("--cardh", Math.floor(L.cardH) + "px");
+    els.board.style.setProperty("--nm", L.nm.toFixed(1) + "px");
+    els.board.style.setProperty("--no", Math.max(11, L.nm * 0.46).toFixed(1) + "px");
+
+    // 교탁·자리는 왼쪽 줄 번호 칸만큼 오른쪽으로 치우쳐 있다 → 안내·상단 이름도 같은 선에 맞춘다
+    document.querySelector(".app").style.setProperty("--board-shift", Math.round(sideW / 2) + "px");
+
+    els.podiumBar.style.height = barH + "px";
+    els.podiumBar.style.width =
+      Math.round(Math.min(L.w, Math.max(130, L.cardW * 1.25 + gap))) + "px";
+  }
+
+  // 상단바에 "언제 배치했는지" — 마지막으로 자리를 뽑은 날짜
+  function showPlacedDate(){
+    const d = placedAt ? new Date(placedAt) : null;
+    if(!d || isNaN(d)){ els.placedDate.textContent = ""; return; }
+    els.placedDate.innerHTML =
+      `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일<span class="suffix">배치</span>`;
+  }
+
+  function paint(){
+    for(let i=0;i<cells.length;i++){
+      const el = cells[i], s = seats[i] != null ? students[seats[i]] : null;
+      const nm = el.querySelector(".nm"), no = el.querySelector(".no");
+      // 기준 배치와 다를 때만 '교환됨' → 원래대로 되돌리면 표시가 사라진다
+      // (추첨 애니메이션 중에는 기준 배치가 아직 정해지지 않았으므로 표시하지 않는다)
+      const moved = !busy && !locked[i] && seats[i] !== (base[i] != null ? base[i] : null);
+
+      nm.textContent = s ? s.name : "";
+      nm.classList.toggle("long", !!s && s.name.length >= 5);
+      no.textContent = s ? s.no + "번" + (s.role ? " · " + s.role : "") : "";   // 예) 16번 · 회장
+      el.classList.toggle("empty", !s && !editing);
+      el.classList.toggle("locked", !!locked[i]);
+      el.classList.toggle("swapped", moved);
+      el.querySelector(".mark").textContent = "";     // 고정·교환은 테두리로 보인다
+    }
+    showPlacedDate();
+    updateConfirm();
+    const seated = seats.filter(v => v != null).length;
+    // 현황 줄 — 숫자는 흐리게 (시안과 같은 모양)
+    els.count.replaceChildren(...[
+      ["학생", students.length], ["자리", cells.length],
+      ["줄", +els.rows.value || 0], ["분단", Math.ceil((+els.cols.value || 0) / 2)],
+    ].map(([lab, n]) => {
+      const sp = document.createElement("span");
+      sp.append(lab + " ");
+      const i = document.createElement("i"); i.textContent = n;
+      sp.append(i);
+      return sp;
+    }));
+
+    const over = students.length - cells.length;
+    if(over > 0){
+      els.warn.textContent = `좌석(${cells.length}칸)보다 학생이 ${over}명 많습니다. 가로·세로 수를 늘려 주세요.`;
+      els.warn.classList.add("on");
+    }else{
+      els.warn.classList.remove("on");
+    }
+  }
+
+  /* ── 이름 바꾸기 모드 ──────────────────────── */
+  function setEdit(on){
+    if(on === editing || busy) return;
+    editing = on;
+    document.body.classList.toggle("editing", on);
+    els.legend.hidden = on;
+    els.editLegend.hidden = !on;
+    if(on) toggleMenu(false);   // 나머지 상단 버튼은 CSS(body.editing)로 감춘다
+
+    if(on){
+      cells.forEach((el, i) => {
+        const s = seats[i] != null ? students[seats[i]] : null;
+        const ed = el.querySelector(".ed");
+        ed.value = s ? s.name : "";
+        ed.hidden = false;
+        el.querySelector(".nm").hidden = true;
+        el.draggable = false;
+      });
+      paint();
+      focusSeat(0);
+    }else{
+      commitEdits();
+      cells.forEach(el => {
+        el.querySelector(".ed").hidden = true;
+        el.querySelector(".nm").hidden = false;
+        el.draggable = true;
+      });
+      paint();
+      save();
+    }
+  }
+
+  function focusSeat(i){
+    if(i < 0 || i >= cells.length){ setEdit(false); return; }
+    const ed = cells[i].querySelector(".ed");
+    ed.focus(); ed.select();
+  }
+
+  // 좌석 칸에 적힌 이름을 읽어 명단을 다시 만든다
+  function commitEdits(){
+    const n = cells.length;
+    const entries = [];
+    for(let i=0;i<n;i++){
+      const raw = cells[i].querySelector(".ed").value.trim();
+      if(!raw) continue;
+      const m = raw.match(NUM_RE);
+      const prev = seats[i] != null ? students[seats[i]] : null;
+      entries.push({
+        seat:i,
+        name: m ? m[2].trim() : raw,
+        no:   m ? +m[1] : (prev ? prev.no : 0),     // 번호를 안 쓰면 원래 번호를 유지
+        role: prev ? prev.role : undefined          // 역할도 그대로 따라간다
+      });
+    }
+
+    const oldSeats = seats.slice(), oldBase = base.slice();
+
+    // 번호 충돌 정리 후 번호순으로 명단 구성
+    const taken = new Set();
+    for(const e of entries){
+      if(e.no && !taken.has(e.no)) taken.add(e.no);
+      else e.no = 0;
+    }
+    let next = 1;
+    for(const e of entries){
+      if(e.no) continue;
+      while(taken.has(next)) next++;
+      e.no = next; taken.add(next);
+    }
+    entries.sort((a,b) => a.no - b.no);
+
+    students = entries.map(e => {
+      const s = { no:e.no, name:e.name };
+      if(e.role) s.role = e.role;
+      return s;
+    });
+    seats = new Array(n).fill(null);
+    entries.forEach((e, idx) => { seats[e.seat] = idx; });
+
+    // 교환 표시가 유지되도록, 같은 자리에 있던 사람끼리 이어서 기준 배치를 옮겨 준다
+    // (이름·번호만 고친 경우는 같은 사람으로 보고 교환 표시가 생기지 않는다)
+    const remap = new Map();
+    for(let i=0;i<n;i++){
+      if(oldSeats[i] != null) remap.set(oldSeats[i], seats[i]);
+    }
+    base = oldBase.map(v => (v != null && remap.has(v)) ? remap.get(v) : null);
+    lockWho = lockWho.map(v => (v != null && remap.has(v)) ? remap.get(v) : null);
+
+    // 비어 있던 자리에 새로 적은 이름은 '교환'이 아니므로 기준 배치로 삼는다
+    for(let i=0;i<n;i++){
+      if(oldSeats[i] == null && oldBase[i] == null && seats[i] != null) base[i] = seats[i];
+    }
+  }
+
+  /* ── 역할 (회장 / 부회장) ──────────────────── */
+  const ROLES = ["회장", "부회장"];
+
+  function syncRoleInputs(){
+    const of = role => (students.find(s => s.role === role) || {}).name || "";
+    els.roleA.value = of("회장");
+    els.roleB.value = of("부회장");
+  }
+
+  function fillNameList(){
+    els.nameList.replaceChildren(...students.map(s => {
+      const o = document.createElement("option");
+      o.value = s.name;
+      return o;
+    }));
+  }
+
+  function applyRole(role, input){
+    const name = input.value.trim();
+    for(const s of students) if(s.role === role) delete s.role;   // 기존 담당자 해제
+    if(name){
+      const t = students.find(s => s.name === name);
+      if(t) t.role = role;                                        // 한 사람은 역할 하나
+      else toast(`‘${name}’ 이름의 학생이 명단에 없습니다.`);
+    }
+    syncRoleInputs(); paint(); save();
+  }
+
+  function renumberByName(){
+    if(!students.length) return;
+    const order = students.map((s, i) => i)
+                          .sort((a, b) => students[a].name.localeCompare(students[b].name, "ko"));
+    const map = new Map(order.map((oldIdx, k) => [oldIdx, k]));
+    const numbers = new Map(order.map((oldIdx, k) => [students[oldIdx].no, k + 1]));
+    const remapNo = no => no == null ? null : (numbers.get(+no) ?? no);
+    const remapKeys = bag => Object.fromEntries(Object.entries(bag || {}).map(([no, value]) => [remapNo(no), value]));
+    const remapHistory = list => (list || []).map(h => Object.assign({}, h, {seats:h.seats.map(remapNo)}));
+    seatHistory = remapHistory(seatHistory);
+    if(committed){
+      for(const key of ["seats", "base"]) committed[key] = committed[key].map(v => v == null ? null : (map.get(v) ?? null));
+      committed.seatHistory = remapHistory(committed.seatHistory);
+    }
+    const cleaning = extra.cleaning;
+    if(cleaning){
+      for(const key of ["assign", "base"])
+        for(const id of Object.keys(cleaning[key] || {})) cleaning[key][id] = cleaning[key][id].map(remapNo);
+      for(const key of ["locked", "excluded", "badly"])
+        if(Array.isArray(cleaning[key])) cleaning[key] = cleaning[key].map(remapNo);
+      for(const key of ["chief", "vice", "captain"]) if(key in cleaning) cleaning[key] = remapNo(cleaning[key]);
+      for(const role of cleaning.roles || []) role.no = remapNo(role.no);
+      cleaning.checks = remapKeys(cleaning.checks);
+      for(const week of Object.keys(cleaning.marks || {})) cleaning.marks[week] = remapKeys(cleaning.marks[week]);
+      for(const history of cleaning.history || []){
+        history.rec = remapKeys(history.rec);
+        if(history.chk) history.chk = remapKeys(history.chk);
+      }
+    }
+    // Scratch checkmarks are browser-local and keyed by number, too.
+    try{
+      const scratch = JSON.parse(localStorage.getItem("check-scratch") || "{}");
+      localStorage.setItem("check-scratch", JSON.stringify(Object.fromEntries(Object.entries(scratch).map(([key,value]) => {
+        const [no, ...rest] = key.split(":"); return [[remapNo(no), ...rest].join(":"), value];
+      }))));
+    }catch(e){}
+    students = order.map((oldIdx, k) => {
+      const s = { no:k+1, name:students[oldIdx].name };
+      if(students[oldIdx].role) s.role = students[oldIdx].role;
+      return s;
+    });
+    seats = seats.map(v => (v != null && map.has(v)) ? map.get(v) : null);
+    base  = base.map(v => (v != null && map.has(v)) ? map.get(v) : null);
+    lockWho = lockWho.map(v => (v != null && map.has(v)) ? map.get(v) : null);
+    paint(); save();
+    toast("이름 가나다순으로 번호를 다시 매겼습니다.");
+  }
+
+  /* ── 좌석 상호작용 (클릭=고정 / 드래그=교환) ── */
+  let dragFrom = null;
+
+  function bindSeat(el){
+    const i = +el.dataset.i;
+    const ed = el.querySelector(".ed");
+
+    // 애니메이션이 끝나면 클래스를 떼어 낸다.
+    // 남겨 두면 좌석이 합성 레이어로 유지돼 인쇄할 때 비트맵으로 구워진다(=화질 저하).
+    el.addEventListener("animationend", () => {
+      el.classList.remove("pop", "settle");
+      el.style.removeProperty("--d");
+    });
+
+    el.addEventListener("click", () => {
+      // TV 화면은 보여 주기만 한다 — 거기서 전체화면을 켜려고 누른 클릭에
+      // 고정이 바뀌면, 노트북에서 돌릴 때 그 학생이 따라 움직인다.
+      if(TV || busy) return;
+      if(editing){ ed.focus(); ed.select(); return; }
+      locked[i] = !locked[i];
+      lockWho[i] = locked[i] ? seats[i] : null;    // 자리와 함께 지금 앉은 학생을 기억한다
+      paint(); save();
+    });
+
+    ed.addEventListener("keydown", e => {
+      if(e.key === "Enter"){ e.preventDefault(); focusSeat(i + (e.shiftKey ? -1 : 1)); }
+      else if(e.key === "Escape"){ e.preventDefault(); ed.blur(); setEdit(false); }
+    });
+
+    el.addEventListener("dragstart", e => {
+      if(TV || busy || editing){ e.preventDefault(); return; }
+      if(locked[i]){ e.preventDefault(); toast("고정된 자리입니다. 눌러서 고정을 풀고 옮기세요."); return; }
+      dragFrom = i;
+      el.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(i));
+    });
+    el.addEventListener("dragend", () => {
+      el.classList.remove("dragging");
+      cells.forEach(c => c.classList.remove("drag-over"));
+      dragFrom = null;
+    });
+    el.addEventListener("dragover", e => {
+      if(dragFrom === null || dragFrom === i || locked[i]) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el.classList.add("drag-over");
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+    el.addEventListener("drop", e => {
+      e.preventDefault();
+      el.classList.remove("drag-over");
+      const from = dragFrom;
+      if(from === null || from === i || locked[i] || locked[from]) return;
+
+      const t = seats[i]; seats[i] = seats[from]; seats[from] = t;
+      [i, from].forEach(k => {
+        cells[k].classList.remove("pop");
+        void cells[k].offsetWidth;
+        cells[k].classList.add("pop");
+      });
+      paint(); markDirty();
+    });
+  }
+
+  /* ── 랜덤 배치 ─────────────────────────────── */
+  function shuffled(arr){
+    const a = arr.slice();
+    for(let i=a.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  function assign(open, pool){
+    for(let k=0;k<open.length;k++) seats[open[k]] = k < pool.length ? pool[k] : null;
+  }
+
+  function doShuffle(){
+    if(busy || editing) return;
+
+    // 고정된 자리의 학생은 그대로 두고 나머지만 섞는다
+    const open = [], keep = new Set();
+    for(let i=0;i<cells.length;i++){
+      if(locked[i]){ if(seats[i] != null) keep.add(seats[i]); }
+      else open.push(i);
+    }
+    if(!open.length) return;
+
+    const pool = [];
+    for(let i=0;i<students.length;i++) if(!keep.has(i)) pool.push(i);
+
+    busy = true;
+    els.shuffle.disabled = true;
+    document.body.classList.add("spinning");
+
+    // 처음엔 빠르게, 갈수록 느리게 — 돌아가던 룰렛이 멈추는 느낌
+    const start = performance.now(), DURATION = 2600;
+    (function tick(){
+      const p = Math.min(1, (performance.now() - start) / DURATION);
+      assign(open, shuffled(pool));
+      paint();
+
+      if(p >= 1){
+        assign(open, shuffled(pool));
+        base = seats.slice();                   // 새로 뽑은 자리가 기준이 된다 (화면에서만)
+        // 배치 날짜와 '이전 배치' 기록은 확정할 때 남긴다 — 그전까지는 화면만 바뀐다
+        document.body.classList.remove("spinning");
+        paint();
+        settleSeats(open);                      // 한 칸씩 차례로 내려앉기
+        busy = false;
+        els.shuffle.disabled = false;
+        markDirty();
+        return;
+      }
+      setTimeout(tick, 30 + 300 * Math.pow(p, 3));
+    })();
+  }
+
+  // 앞줄 왼쪽부터 순서대로 착지시킨다
+  function settleSeats(list){
+    const order = list.slice().sort((a, b) => a - b);
+    const step = order.length > 24 ? 28 : 36;
+    order.forEach((i, k) => {
+      const el = cells[i];
+      el.classList.remove("pop", "settle");
+      void el.offsetWidth;
+      el.style.setProperty("--d", (k * step) + "ms");
+      el.classList.add("settle");
+    });
+  }
+
+  /* ── 설정 창 ───────────────────────────────── */
+  const isOpen = () => !els.backdrop.hasAttribute("hidden");
+  function openSheet(){
+    renderHistList();
+    if(editing) return;
+    els.backdrop.removeAttribute("hidden");
+    fillNameList();
+    syncRoleInputs();
+    fileStatus();
+  }
+  function closeSheet(){ els.backdrop.setAttribute("hidden",""); fit(); }
+
+  els.settings.addEventListener("click", openSheet);
+  els.close.addEventListener("click", closeSheet);
+  els.backdrop.addEventListener("mousedown", e => { if(e.target === els.backdrop) closeSheet(); });
+
+  /* ── 알림 ──────────────────────────────────── */
+  let toastTimer = null;
+  function toast(msg, ms){
+    els.toast.textContent = msg;
+    els.toast.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => els.toast.classList.remove("on"), ms || 3200);
+  }
+
+  /* ── 이벤트 연결 ───────────────────────────── */
+  function relayout(){
+    if(editing) return;
+    els.rows.value = clamp(els.rows.value, 1, 12, 5);
+    els.cols.value = clamp(els.cols.value, 1, 12, 6);
+    resetSeats();
+    fillInOrder();
+    buildGrid();
+    dirty = false;                      // 칸 수를 바꾸면 그 자리에서 바로 새 자리를 확정한다
+    committed = grabAssign();
+    save();
+  }
+  els.rows.addEventListener("change", relayout);
+  els.cols.addEventListener("change", relayout);
+
+  els.titleInput.addEventListener("input", () => { renderTitle(); save(); });
+  els.titleShow.addEventListener("change", () => { renderTitle(); save(); });
+  els.renameStart.addEventListener("click", () => { closeSheet(); setEdit(true); });
+  els.doneEdit.addEventListener("click", () => setEdit(false));
+  els.renumber.addEventListener("click", renumberByName);
+  els.clearHist.addEventListener("click", () => {
+    if(!seatHistory.length){ toast("지울 기록이 없습니다."); return; }
+    if(!confirm(`이전 배치 기록 ${seatHistory.length}회를 모두 지울까요?`)) return;
+    seatHistory = [];
+    renderHistList(); save();
+    toast("이전 배치 기록을 모두 지웠습니다.");
+  });
+
+  els.clearSwap.addEventListener("click", () => {
+    if(busy) return;
+    base = seats.slice();                       // 지금 배치를 기준으로 삼는다
+    paint(); save();
+    toast("지금 배치를 기준으로 삼았습니다. 교환 표시가 사라집니다.");
+  });
+  els.roleA.addEventListener("change", () => applyRole("회장", els.roleA));
+  els.roleB.addEventListener("change", () => applyRole("부회장", els.roleB));
+  els.shuffle.addEventListener("click", doShuffle);
+  els.confirmBtn.addEventListener("click", confirmSeats);
+  function toggleMenu(show){
+    const on = show === undefined ? els.printMenu.hasAttribute("hidden") : show;
+    if(on) els.printMenu.removeAttribute("hidden");
+    else els.printMenu.setAttribute("hidden", "");
+    els.printBtn.classList.toggle("open", on);
+    els.printBtn.setAttribute("aria-expanded", String(on));
+  }
+
+  // podium = 이름을 180° 돌려서 인쇄 (교탁용)
+  /* ── 배치를 그림으로 만들어 클립보드에 담기 ── */
+  // 화면에 보이는 그대로를 SVG 안에 담아 캔버스로 옮긴다.
+  // 글꼴이 시스템 글꼴(맑은 고딕·Noto Sans KR 등)이라 따로 넣지 않아도 그대로 나온다.
+  const SHOT_PAD = 18, SHOT_GAP = 12, SHOT_SCALE = 2;
+
+  async function makeShot(){
+    document.body.classList.add("shooting");   // 제목은 그림에 담을 때만 보인다
+    try{ return await makeShotInner(); }
+    finally{ document.body.classList.remove("shooting"); }
+  }
+
+  async function makeShotInner(){
+    const nodes = shotNodes();
+    if(!nodes.length) throw new Error("담을 것이 없습니다");
+
+    const rects = nodes.map(n => n.getBoundingClientRect());
+    const w = Math.ceil(Math.max(...rects.map(r => r.width))) + SHOT_PAD * 2;
+    const h = Math.ceil(rects.reduce((a, r) => a + r.height, 0)
+                        + SHOT_GAP * (nodes.length - 1)) + SHOT_PAD * 2;
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      `width:${w}px;height:${h}px;box-sizing:border-box;padding:${SHOT_PAD}px;` +
+      `display:flex;flex-direction:column;align-items:center;justify-content:flex-start;` +
+      `gap:${SHOT_GAP}px;background:#fff;` +
+      `font-family:${getComputedStyle(document.body).fontFamily};`;
+
+    const st = document.createElement("style");
+    st.textContent = [...document.querySelectorAll("style")].map(s => s.textContent).join("\n") +
+      "\n*{animation:none!important;transition:none!important;box-shadow:none!important;}";
+    wrap.append(st);
+
+    nodes.forEach((n, i) => {
+      const c = n.cloneNode(true);
+      // 화면에서만 쓰는 것들은 그림에 넣지 않는다
+      c.querySelectorAll(".legend,.warn,.toast,.mode-note,.roster-bar,.draft-tag,.setup-tip,[hidden]")
+       .forEach(x => x.remove());
+      c.style.flex = "none";
+      c.style.margin = "0";
+      c.style.width  = Math.ceil(rects[i].width) + "px";
+      c.style.height = Math.ceil(rects[i].height) + "px";
+      wrap.append(c);
+    });
+
+    const xml = new XMLSerializer().serializeToString(wrap);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+                `<foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
+
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new Error("그림을 만들지 못했습니다"));
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    });
+
+    const cv = document.createElement("canvas");
+    cv.width = w * SHOT_SCALE; cv.height = h * SHOT_SCALE;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.scale(SHOT_SCALE, SHOT_SCALE);
+    ctx.drawImage(img, 0, 0);
+
+    return new Promise((res, rej) =>
+      cv.toBlob(b => b ? res(b) : rej(new Error("그림을 만들지 못했습니다")), "image/png"));
+  }
+
+  async function copyShot(){
+    if(busy) return;
+    let blob;
+    try{
+      blob = await makeShot();
+    }catch(e){
+      toast("그림을 만들지 못했습니다. 다시 시도해 주세요.", 4000);
+      return;
+    }
+    try{
+      if(!navigator.clipboard || !window.ClipboardItem) throw new Error("클립보드 없음");
+      await navigator.clipboard.write([ new ClipboardItem({ "image/png": blob }) ]);
+      toast("배치 그림을 복사했습니다. 붙여넣기(Ctrl+V) 하세요.", 4000);
+    }catch(e){
+      // 클립보드를 막아 둔 브라우저면 그림 파일로 내려 준다
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = SHOT_NAME();
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast("클립보드를 쓸 수 없어 그림 파일로 저장했습니다.", 5000);
+    }
+  }
+
+  // 그림에 담을 것 : 제목(켜 둔 경우) + 교탁·자리표
+  function shotNodes(){
+    const list = [];
+    if(els.titleShow.checked && els.chartTitle.textContent.trim()) list.push(els.chartTitle);
+    list.push(els.board);
+    return list;
+  }
+  const SHOT_NAME = () =>
+    (els.titleInput.value.trim() || "자리배치도").replace(/[\/:*?"<>|]/g, "") + ".png";
+
+  /* ── TV(외부 화면)로 전환 ───────────────────── */
+  // PPT 슬라이드쇼처럼, HDMI 로 연결된 확장 화면에 큰 화면을 띄우고
+  // 노트북에는 손으로 다루는 화면을 남긴다.
+  const TV = new URLSearchParams(location.search).has("tv");
+  const TV_CH = ("BroadcastChannel" in window) ? new BroadcastChannel("classroom-screen") : null;
+  let tvWin = null, tvWatch = null;
+
+  // 확장 화면(HDMI 등)이 붙어 있을 때만 버튼을 보여 준다
+  const tvReady = () => !!(window.screen && screen.isExtended);
+
+  function syncTvBtn(){
+    if(!els.tvBtn) return;
+    const on = !!(tvWin && !tvWin.closed);
+    els.tvBtn.hidden = TV || !tvReady();
+    els.tvBtn.classList.toggle("on", on);
+    els.tvBtn.title = on ? "TV 끄기 — TV 화면을 닫습니다"
+                         : "TV 에 크게 띄우고 이 화면은 다루는 쪽으로 바꿉니다";
+  }
+
+  // 브라우저는 한 번의 클릭으로 "팝업 열기"와 "전체화면" 을 같이 해 주지 않는다.
+  // (둘이 같은 사용자 동작을 서로 소비한다) → TV 전환 때 전체화면을 먼저 걸고,
+  // 그래도 못 들어간 쪽은 다음 클릭이나 키 입력에 다시 시도한다.
+  // meOk = 이 화면은 이미 전체화면이라 TV 만 남았을 때 true
+  function armFullscreen(meOk){
+    let bar = document.getElementById("fsHint");
+    if(!bar){
+      bar = document.createElement("div");
+      bar.id = "fsHint";
+      bar.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;" +
+        "background:#1c2431;color:#fff;font-size:14px;font-weight:700;padding:11px 18px;" +
+        "border-radius:11px;cursor:pointer;box-shadow:0 6px 24px rgba(15,20,30,.3);";
+      document.body.appendChild(bar);
+    }
+    bar.textContent = meOk ? "Enter 를 누르면 TV 가 전체화면이 됩니다"
+                           : "Enter 를 누르면 TV 가, 이 화면을 누르면 여기도 전체화면이 됩니다";
+    const go = e => {
+      document.removeEventListener("click", go, true);
+      document.removeEventListener("keydown", go, true);
+      bar.remove();
+      // 이 클릭은 '전체화면 켜기' 로만 쓰고 여기서 끝낸다.
+      // 소비하지 않으면 밑에 있는 좌석까지 눌려 고정이 풀린다.
+      if(e && e.type === "click"){
+        e.preventDefault();
+        e.stopPropagation();
+        if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+      }
+      tvFullscreen();          // TV 부터 (거기는 아무도 누를 수 없다)
+      goFullNow();
+      if(!tvFullscreenOn()) setTimeout(() => { try{ tvWin && tvWin.focus(); }catch(err){} }, 300);
+    };
+    document.addEventListener("click", go, true);
+    document.addEventListener("keydown", go, true);
+    // 시간이 지나면 안내를 거둔다. 리스너도 같이 떼야 한다 —
+    // 남겨 두면 그 뒤의 클릭 한 번이 (소비돼) 아무 일도 없이 사라진다.
+    setTimeout(() => {
+      document.removeEventListener("click", go, true);
+      document.removeEventListener("keydown", go, true);
+      bar.remove();
+    }, 15000);
+  }
+
+  function goFullNow(){
+    const el = document.documentElement;
+    if(document.fullscreenElement || !el.requestFullscreen) return;
+    try{ const p = el.requestFullscreen({ navigationUI:"hide" }); if(p) p.catch(() => {}); }
+    catch(e){}
+  }
+
+  // TV 창을 전체화면으로 만든다.
+  // TV 창 스스로는 사용자 동작이 없어 requestFullscreen 이 거부된다.
+  // 사용자 동작이 살아 있는 이쪽(노트북)에서 대신 걸어 준다 — 같은 출처라 된다.
+  // 그래도 막히면 TV 에게 직접 시도하라고 알린다.
+  function tvFullscreen(){
+    if(!tvWin || tvWin.closed) return;
+    try{
+      const d = tvWin.document;
+      if(d && !d.fullscreenElement && d.documentElement.requestFullscreen){
+        const p = d.documentElement.requestFullscreen({ navigationUI:"hide" });
+        if(p) p.catch(() => askTvFullscreen());
+        return;
+      }
+    }catch(e){ /* 접근이 막히면 메시지로 부탁한다 */ }
+    askTvFullscreen();
+  }
+  function askTvFullscreen(){
+    if(TV_CH) TV_CH.postMessage({ cmd:"fullscreen" });
+  }
+  // TV 창이 전체화면인지 (읽을 수 없으면 됐다고 보고 더 조르지 않는다)
+  function tvFullscreenOn(){
+    if(!tvWin || tvWin.closed) return true;
+    try{ return !!tvWin.document.fullscreenElement; }catch(e){ return true; }
+  }
+
+  async function toggleTv(){
+    if(tvWin && !tvWin.closed){
+      tvWin.close();                                     // 감시 타이머가 뒷정리한다
+      if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      return;
+    }
+
+    // 전체화면을 '먼저' 요청한다.
+    // window.open 이 사용자 동작을 써 버리므로 팝업을 먼저 열면 그 뒤의
+    // requestFullscreen 은 거부된다. (실측 : 팝업 먼저 0/3, 전체화면 먼저 5/5)
+    goFullNow();
+
+    let feat = "width=1280,height=800";
+    try{
+      if(window.getScreenDetails){
+        const d = await window.getScreenDetails();
+        const other = d.screens.filter(s => s !== d.currentScreen);
+        const t = other.find(s => !s.isPrimary) || other[0];
+        if(t) feat = `left=${t.availLeft},top=${t.availTop},width=${t.availWidth},height=${t.availHeight}`;
+      }
+    }catch(e){ /* 권한을 거부하면 기본 크기로 연다 */ }
+
+    tvWin = window.open(location.pathname + "?tv=1", "classroomTv",
+                        feat + ",menubar=no,toolbar=no,location=no,status=no");
+    if(!tvWin){
+      toast("팝업이 막혀 있습니다. 주소창 오른쪽의 팝업 허용을 눌러 주세요.", 6000);
+      return;
+    }
+    onTvOpened();
+    syncTvBtn();
+    try{ tvWin.focus(); }catch(e){}        // 키보드를 TV 로 → Enter 한 번이면 TV 가 전체화면
+    // 이 화면은 위에서 이미 전체화면이 됐다. TV 쪽은 자기 사용자 동작이 없어
+    // 막힐 수 있으니 곧바로 한 번 걸어 보고, 그래도 안 되면 다음 클릭을 기다린다.
+    tvFullscreen();
+    setTimeout(() => {
+      const meOk = !!document.fullscreenElement;
+      const tvOk = tvFullscreenOn();
+      if(!meOk || !tvOk) armFullscreen(meOk);
+    }, 500);
+    clearInterval(tvWatch);
+    tvWatch = setInterval(() => {
+      if(tvWin && tvWin.closed){
+        clearInterval(tvWatch); tvWin = null; onTvClosed(); syncTvBtn();
+      }
+    }, 700);
+  }
+
+  // 노트북 쪽에서 내용이 바뀌면 TV 화면에 알린다
+  function tvPing(){ if(TV_CH && !TV) TV_CH.postMessage("changed"); }
+
+  if(TV){
+    document.body.classList.add("tv");
+    // TV 창은 스스로 누른 적이 없어서 전체화면이 막힐 수 있다.
+    // 열리자마자 · 잠시 뒤 · 첫 클릭 때까지 여러 번 시도한다.
+    // 꽉 찼는가 — 코드로 켠 전체화면이든 F11(브라우저 전체화면)이든 화면을 채우면 된 것으로 본다.
+    // (F11 상태에서 코드가 또 전체화면을 걸면 둘이 번갈아 켜지고 꺼져 여러 번 눌러야 했다)
+    const isFull = () => !!document.fullscreenElement ||
+      (innerWidth >= screen.width - 2 && innerHeight >= screen.height - 2);
+    let tip = null;
+    const hideTip = () => { if(tip){ tip.remove(); tip = null; } };
+    const goFull = e => {
+      // F11 은 브라우저가 알아서 한다 — 여기서 또 걸면 서로 뒤집는다. Esc 는 창 닫기다.
+      if(e && e.type === "keydown" && (e.key === "F11" || e.key === "Escape")) return;
+      if(isFull()){ hideTip(); return; }
+      const el = document.documentElement;
+      try{ const p = el.requestFullscreen({ navigationUI:"hide" }); if(p) p.then(hideTip, () => {}); }
+      catch(err){}
+    };
+    // 이 창은 누른 적이 없어 자동 요청은 브라우저가 거의 막는다. 그래도 한 번은 해 본다.
+    goFull();
+    // 이 창에서의 첫 동작(Enter 같은 아무 키 · 클릭 한 번)으로 전체화면이 된다.
+    ["keydown", "pointerdown"].forEach(ev => window.addEventListener(ev, goFull, true));
+    document.addEventListener("fullscreenchange", () => { if(isFull()) hideTip(); });
+    window.addEventListener("resize", () => { if(isFull()) hideTip(); });
+    // 안내는 TV 한가운데 크게 — 전체화면이 될 때까지 둔다
+    setTimeout(() => {
+      if(isFull() || tip) return;
+      tip = document.createElement("div");
+      tip.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;" +
+        "background:rgba(30,30,30,.92);color:#fff;font-size:22px;font-weight:600;" +
+        "padding:18px 28px;border-radius:8px;text-align:center;line-height:1.5;pointer-events:none;";
+      tip.textContent = "Enter 를 누르거나 화면을 한 번 누르면 전체화면이 됩니다";
+      document.body.appendChild(tip);
+    }, 600);
+    document.addEventListener("keydown", e => { if(e.key === "Escape") window.close(); });
+    if(TV_CH) TV_CH.onmessage = e => {
+      const m = e.data;
+      if(m && m.cmd === "close"){ window.close(); return; }
+      if(m && m.cmd === "fullscreen"){ goFull(); return; }
+      if(m && m.ask){ TV_CH.postMessage({ alive:1 }); return; }
+      // 노트북이 보낸 지금 화면 — 확정 전 배치도 그대로 보여 준다
+      if(m && m.cmd === "state"){
+        if(m.page === "seating" && m.data){ liveAt = Date.now(); if(apply(m.data)) buildGrid(); }
+        return;
+      }
+      // 파일은 '확정본' 이라, 노트북 화면을 받고 있는 동안엔 다시 읽지 않는다
+      if(m === "changed" && SERVER && Date.now() - liveAt > 30000) loadServer();
+    };
+    // 살아 있다고 알려 준다 (다른 페이지의 'TV 끄기' 버튼이 이걸 본다)
+    if(TV_CH) setInterval(() => TV_CH.postMessage({ alive:1 }), 1500);
+    setInterval(() => { if(SERVER && Date.now() - liveAt > 30000) loadServer(); }, 20000);   // 놓친 변화 대비
+  }else if(window.screen && "addEventListener" in window.screen){
+    try{ screen.addEventListener("change", syncTvBtn); }catch(e){}
+  }
+  window.addEventListener("pagehide", () => { if(tvWin && !tvWin.closed) tvWin.close(); });
+
+  if(!TV){
+    setInterval(() => { if(dirty && tvWin && !tvWin.closed) tvSend(); }, 3000);
+    syncTvBtn();
+    setInterval(syncTvBtn, 2000);     // HDMI 를 꽂거나 빼면 버튼이 따라 나타나고 사라진다
+  }
+
+  // 자리 배치는 TV 에만 크게 띄우고, 노트북 화면은 그대로 둔다
+  function onTvOpened(){
+    toast("TV 에 자리 배치를 띄웠습니다.", 4000);
+  }
+  function onTvClosed(){}
+
+  function doPrint(podium){
+    document.body.classList.toggle("podium", !!podium);
+    const cleanup = () => document.body.classList.remove("podium");
+    window.addEventListener("afterprint", cleanup, { once:true });
+    setTimeout(cleanup, 60000);                 // afterprint 가 오지 않는 경우의 안전장치
+    window.print();
+  }
+
+  els.tvBtn.addEventListener("click", toggleTv);
+  els.printBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    if(!editing) toggleMenu();
+  });
+  els.printMenu.addEventListener("click", e => {
+    const item = e.target.closest("button[data-print]");
+    if(!item) return;
+    toggleMenu(false);
+    if(item.dataset.print === "copy"){
+      copyShot();
+    }else if(item.dataset.print === "podium"){
+      setTimeout(() => doPrint(true), 60);       // 패널이 닫힌 다음 인쇄 창을 연다
+    }else if(item.dataset.print === "pdf"){
+      setTimeout(() => doPrint(false), 60);
+    }else{
+      doPrint(false);
+    }
+  });
+  document.addEventListener("click", () => toggleMenu(false));
+
+  els.fileChip.addEventListener("click", () => {
+    if(SERVER) openSheet();
+    else if(pendingHandle) reconnect();
+    else if(fileHandle) openSheet();
+    else if(FS_OK) linkNew();
+    else openSheet();
+  });
+  els.fileNew.addEventListener("click", linkNew);
+  els.fileOpen.addEventListener("click", linkOpen);
+  els.fileExport.addEventListener("click", exportFile);
+  els.fileImport.addEventListener("click", () => els.filePicker.click());
+
+  document.addEventListener("keydown", e => {
+    if(e.key === "Escape"){
+      if(isOpen()){ closeSheet(); return; }
+      toggleMenu(false);
+    }
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if(TV) return;
+    if(e.code === "Space" && !typing && !isOpen() && !editing){ e.preventDefault(); doShuffle(); }
+  });
+
+  window.addEventListener("resize", fit);
+  if(window.ResizeObserver) new ResizeObserver(fit).observe(els.area);
+
+  /* ── 페이지 전환 ───────────────────────────── */
+  const app = document.querySelector(".app");
+  // 애니메이션이 끝나면 클래스를 제거한다. 남겨 두면 합성 레이어가 유지돼 인쇄 화질이 떨어진다.
+  app.addEventListener("animationend", () =>
+    document.body.classList.remove("entering-right", "entering-left"));
+
+  // 탭 순서 : 자리 배치 → 청소 역할 → 청소 체크.
+  // 오른쪽 탭으로 갈수록 화면이 왼쪽으로 밀리도록 방향을 자동으로 정한다.
+  const PAGES = ["index.html", "cleaning.html", "check.html"];
+  const pageIdx = u => {
+    const f = String(u).split("/").pop().split("?")[0];
+    const i = PAGES.indexOf(f || "index.html");
+    return i < 0 ? 0 : i;
+  };
+  const HERE = pageIdx(location.pathname);
+
+  window.addEventListener("beforeunload", e => {
+    if(SERVER && (needsSave || window.classroomStorage?.pending)){
+      e.preventDefault(); e.returnValue = "";
+    }
+  });
+  let navigating = false;
+  async function flushBeforeNavigation(){
+    clearTimeout(saveTimer); saveTimer = null;
+    if(SERVER){
+      while(needsSave || window.classroomStorage?.pending){
+        if(!await putServer()) return false;
+      }
+      return !window.classroomStorage?.blocked;
+    }
+    return fileHandle ? await writeFile() : true;
+  }
+
+  async function navTo(url, dir){
+    if(editing || busy) return;
+    dir = pageIdx(url) > HERE ? "left" : "right";
+    if(navigating) return;
+    navigating = true;
+    if(!await flushBeforeNavigation()){
+      navigating = false;
+      toast("저장하지 못해 화면 이동을 멈췄습니다. 저장 상태를 확인해 주세요.");
+      return;
+    }
+    sessionStorage.setItem("navdir", dir);
+    document.body.classList.add(dir === "left" ? "leaving-left" : "leaving-right");
+    setTimeout(() => { location.href = url; }, 235);
+  }
+  els.toCleaning.addEventListener("click", () => navTo("cleaning.html"));
+  els.toCheck.addEventListener("click", () => navTo("check.html"));
+
+  const navdir = sessionStorage.getItem("navdir");
+  if(navdir){
+    sessionStorage.removeItem("navdir");
+    document.body.classList.add(navdir === "right" ? "entering-left" : "entering-right");
+  }
+
+  /* ── 시작 ──────────────────────────────────── */
+  if(SERVER){                                   // start.bat 으로 켠 경우 : 연결 버튼이 필요 없다
+    els.fsButtons.hidden = true;
+    els.dlButtons.hidden = true;
+    els.fileHint.textContent = "";
+  }else if(!FS_OK){                             // 파일 자동 저장을 못 쓰는 브라우저
+    els.fsButtons.hidden = true;
+    els.dlButtons.hidden = false;
+    els.fileHint.textContent =
+      "이 브라우저는 파일 자동 저장을 지원하지 않습니다. 내보내기로 저장 파일을 만들고, 다음에 불러오기로 여세요. (Chrome·Edge 권장)";
+  }
+
+  let cached = null;
+  try{ cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); }catch(e){}
+  if(!apply(cached)){
+    students = DEFAULT_NAMES.map((name, i) => {
+      const s = { no:i+1, name };
+      if(DEFAULT_ROLES[name]) s.role = DEFAULT_ROLES[name];
+      return s;
+    });
+    resetSeats();
+    fillInOrder();
+    committed = grabAssign();
+  }
+  renderTitle();
+  buildGrid();
+  fileStatus();
+
+  // 서버 모드에서는 살아 있다는 신호를 보낸다. 이 신호가 끊기면 프로그램이 스스로 종료된다.
+  if(SERVER){
+    const ping = () => fetch("api/ping", { cache:"no-store" }).catch(() => {});
+    ping();
+    setInterval(ping, 5000);
+    document.addEventListener("visibilitychange", () => { if(!document.hidden) ping(); });
+  }
+
+
+  if(SERVER) loadServer();                      // 서버가 가진 data.json 이 기준
+  else restoreHandle();                         // 저장 파일이 있으면 그 내용으로 덮어쓴다
+})();
+</script>
+</body>
+</html>

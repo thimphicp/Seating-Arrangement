@@ -1,0 +1,1153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<script src="persistence.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>청소 체크</title>
+<style>
+  /* ────────────────────────────────────────────
+     청소 체크 — 회색 한 계열 + 파랑 하나, 이모지 없음, 모서리 2/4/6px.
+     표를 만드는 코드는 그대로다. 칸 이름(c-area · c-std · c-nm · c-it ·
+     c-sc · c-box · c-sum)도 예전 그대로 쓴다.
+     ──────────────────────────────────────────── */
+  :root{
+    --bg:#f5f5f5;
+    --surface:#ffffff;
+    --line:#e6e6e6;
+    --line-2:#d9d9d9;
+    --ink:#1e1e1e;
+    --ink-2:#757575;
+    --ink-3:#b3b3b3;
+    --accent:#0d99ff;
+    --danger:#d93025;
+    --mark:#b3261e;          /* 지적 */
+    --mark-fill:#f7efe9;
+    --off:#f0f0f0;           /* 그 요일에 안 하는 구역 */
+
+    --r-sm:2px;   /* 입력 */
+    --r-md:4px;   /* 버튼 */
+    --r-lg:6px;   /* 패널 */
+  }
+  *{box-sizing:border-box;}
+  [hidden]{display:none !important;}
+  html,body{height:100%;}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",-apple-system,"Segoe UI",sans-serif;
+    font-size:12px;line-height:1.45;-webkit-font-smoothing:antialiased;
+  }
+  .app{height:100vh;display:flex;flex-direction:column;}
+
+  /* ── 페이지 전환 ── */
+  @keyframes pageOutLeft {from{transform:none;opacity:1} to{transform:translateX(-14px);opacity:0}}
+  @keyframes pageOutRight{from{transform:none;opacity:1} to{transform:translateX(14px);opacity:0}}
+  @keyframes pageInRight {from{transform:translateX(16px);opacity:0} to{transform:none;opacity:1}}
+  @keyframes pageInLeft  {from{transform:translateX(-16px);opacity:0} to{transform:none;opacity:1}}
+  body.leaving-left  .app{animation:pageOutLeft .15s ease-in forwards;}
+  body.leaving-right .app{animation:pageOutRight .15s ease-in forwards;}
+  body.entering-right .app{animation:pageInRight .22s cubic-bezier(.22,.61,.36,1);}
+  body.entering-left  .app{animation:pageInLeft .22s cubic-bezier(.22,.61,.36,1);}
+  @media (prefers-reduced-motion: reduce){
+    body.leaving-left .app,body.leaving-right .app,
+    body.entering-right .app,body.entering-left .app{animation:none;}
+  }
+
+  /* ── 상단 도구 막대 ── */
+  .topbar{
+    flex:none;height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;
+    background:#ebebeb;border-bottom:1px solid #dcdcdc;
+  }
+  .sep{width:1px;height:20px;background:#d5d5d5;flex:none;}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:4px;}
+
+  .pager{display:flex;gap:1px;}
+  .pager button{
+    border:none;background:transparent;color:var(--ink-2);
+    font-size:14px;font-weight:500;padding:6px 12px;border-radius:var(--r-md);
+  }
+  .pager button:hover{background:#dedede;color:var(--ink);}
+  .pager button.on{background:var(--surface);color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  button{
+    font-family:inherit;cursor:pointer;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+    border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+    border-radius:var(--r-md);font-size:13px;font-weight:500;
+  }
+  button:hover{background:#f5f5f5;}
+  button:disabled{opacity:.45;cursor:default;}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  button svg{flex:none;}
+  /* 켜져 있는 상태 — 가리기 · 지난 날짜 · TV */
+  button.on{background:#dcdcdc;border-color:#c4c4c4;color:var(--ink);}
+  button.on:hover{background:#d3d3d3;}
+  /* 시안의 quiet : 테두리만 투명하고 배경은 흰색 — 회색 바 위에서 하얀 칩으로 보인다 */
+  .quiet{border-color:transparent;color:var(--ink-2);}
+  .quiet:hover{background:#dedede;color:var(--ink);}
+  .icon{padding:0 9px;}
+
+  /* 저장 상태 — 글자만. 문제가 있을 때만 붉게 */
+  .chip-btn{
+    border-color:transparent;background:transparent;max-width:240px;
+    color:var(--ink-2);font-size:13px;font-weight:400;padding:0 4px;
+  }
+  .chip-btn:hover{background:#dedede;color:var(--ink);}
+  .chip-btn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .chip-btn.attn{color:var(--danger);}
+  .chip-btn.attn:hover{background:#f7eceb;}
+
+  /* ── 날짜 줄 ── */
+  .weeks{
+    flex:none;height:42px;display:flex;align-items:center;gap:10px;padding:0 10px;
+    background:#f2f2f2;border-bottom:1px solid var(--line);font-size:13.5px;
+  }
+  .weeks .nav{display:flex;gap:3px;}
+  .weeks .nav button{
+    height:28px;min-width:30px;padding:0 8px;font-size:12px;justify-content:center;
+    color:var(--ink-2);
+  }
+  .weeks .nav button:hover{background:#e4e4e4;color:var(--ink);}
+  .weeks .span{font-size:15px;font-weight:600;white-space:nowrap;}
+  .weeks .span small{
+    display:inline;margin-left:7px;font-size:12.5px;font-weight:400;color:var(--ink-2);
+  }
+  .weeks .right{margin-left:auto;display:flex;align-items:center;gap:6px;}
+  .sum{font-size:13px;color:var(--ink-2);white-space:nowrap;}
+
+  /* ── 표 ── */
+  .stage{flex:1;min-height:0;display:flex;flex-direction:column;padding:8px;}
+  .sheet{
+    flex:1;min-height:0;display:flex;flex-direction:column;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+  }
+  /* --k : 화면 높이에 맞춰 글자와 줄 높이를 함께 키우는 배율 */
+  .scroll{flex:1;min-height:0;overflow:auto;--k:1;}
+
+  table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;}
+  th,td{
+    padding:calc(4px * var(--k)) calc(9px * var(--k));
+    font-size:calc(15px * var(--k));line-height:1.25;
+    vertical-align:middle;border-bottom:1px solid #eef1f4;
+  }
+  thead th{
+    position:sticky;top:0;z-index:2;background:#f2f2f2;
+    font-size:calc(14px * var(--k));font-weight:600;color:var(--ink-2);text-align:center;
+    border-bottom:1px solid var(--line-2);
+  }
+  th.c-area,td.c-area{width:16%;text-align:left;}
+  td.c-area{font-size:calc(17px * var(--k));font-weight:600;letter-spacing:-.01em;}
+  th.c-std,td.c-std{width:28%;text-align:left;}
+  td.c-std{font-size:calc(14.5px * var(--k));color:var(--ink-2);line-height:1.4;word-break:keep-all;}
+  td.c-std.big{font-size:calc(16px * var(--k));}
+  td.c-std .std-line + .std-line{margin-top:calc(3px * var(--k));}
+  td.c-std .it{color:var(--ink-3);font-weight:600;margin-right:4px;}
+  th.c-nm,td.c-nm{width:12%;text-align:left;white-space:nowrap;}
+  td.c-nm{font-size:calc(17px * var(--k));font-weight:500;}
+  th.c-it,td.c-it{width:3.6%;text-align:center;}
+  td.c-it{font-size:calc(13px * var(--k));font-weight:600;color:var(--ink-3);}
+  th.c-sc,td.c-sc{width:6%;text-align:center;}
+  td.c-sc{
+    cursor:pointer;user-select:none;font-weight:700;color:#3d6b52;
+    border-left:1px solid #f1f3f5;font-size:calc(19px * var(--k));
+  }
+  td.c-sc:hover{background:#f2f5f2;}
+  td.c-sc.on{background:#eef2ee;}
+  th.c-day,td.c-box{width:4%;text-align:center;}
+  th.c-day.today,td.c-box.today{width:9%;}
+  th.c-day b{display:block;font-size:calc(15px * var(--k));font-weight:600;color:var(--ink);}
+  th.c-day small{display:block;font-size:calc(11.5px * var(--k));font-weight:400;color:var(--ink-3);}
+  th.c-day.today{background:#e6e6e6;color:var(--ink);}
+  th.c-day.today small{color:var(--ink-2);}
+  th.c-wk{font-size:calc(13px * var(--k));color:var(--ink);}
+  th.c-sum,td.c-sum{width:6%;text-align:center;background:#fafafa;white-space:nowrap;}
+  td.c-sum{font-size:calc(15px * var(--k));color:var(--ink-3);font-variant-numeric:tabular-nums;}
+  td.c-sum.on{color:var(--mark);font-weight:700;}
+
+  /* 지적 칸 */
+  td.c-box{
+    cursor:pointer;user-select:none;font-weight:700;color:var(--mark);
+    border-left:1px solid #f1f3f5;font-size:calc(19px * var(--k));
+  }
+  td.c-box:hover{background:#f5f5f5;}
+  td.c-box.on{background:var(--mark-fill);}
+  td.c-box.off{background:var(--off);cursor:default;}
+  td.c-box.off:hover{background:var(--off);}
+  td.c-box.today{background:#fafafa;}
+  td.c-box.today:hover{background:#f0f0f0;}
+  td.c-box.today.on{background:var(--mark-fill);}
+  td.c-box.locked{cursor:default;color:var(--ink-3);background:#fbfbfb;}
+  td.c-box.locked:hover{background:#fbfbfb;}
+  td.c-box.locked.on{background:#f0f0f0;color:var(--ink-3);}
+  td.wk-edge,th.wk-edge{border-left:2px solid var(--line-2);}
+
+  /* 줄 사이 선은 묶음이 바뀔 때만 진하게 */
+  tr.grp-first > td{border-top:1.5px solid #cfd5dd;}
+  tr.stu-first > td{border-top:1px solid #e6eaef;}
+  td.c-area,td.c-std{background:#fcfcfc;}
+
+  /* 정렬 가능한 머리 */
+  th.sortable{cursor:pointer;user-select:none;}
+  th.sortable:hover{background:#e8e8e8;}
+  th.sortable .ar{margin-left:4px;opacity:.35;font-size:9px;}
+  th.sortable.on{color:var(--ink);}
+  th.sortable.on .ar{opacity:1;}
+
+  /* 끌어서 옮길 수 있는 머리 */
+  th.movable{cursor:grab;}
+  th.movable:active{cursor:grabbing;}
+  th.movable.dragging{opacity:.4;}
+  th.movable.over-l{box-shadow:inset 3px 0 0 var(--ink);}
+  th.movable.over-r{box-shadow:inset -3px 0 0 var(--ink);}
+
+  .empty{padding:44px;text-align:center;color:var(--ink-2);font-size:14px;}
+
+  /* 외부 화면 경고 · 가림막 */
+  .guard,.blind{
+    position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+  }
+  .guard{background:#1e1e1e;}
+  .blind{background:#1e1e1e;cursor:pointer;}
+  .guard-box,.blind-box{text-align:center;color:#f0f0f0;max-width:520px;padding:28px;}
+  .guard-box b,.blind-box b{display:block;font-size:22px;font-weight:600;margin-bottom:10px;}
+  .guard-box p,.blind-box p{margin:0 0 18px;font-size:14px;line-height:1.7;color:#a8a8a8;}
+  .guard-box b b,.guard-box p b,.blind-box p b{display:inline;color:#f0f0f0;font-weight:600;}
+  .guard-box button{background:transparent;border-color:#555;color:#f0f0f0;}
+  .guard-box button:hover{background:#2a2a2a;}
+
+  /* 알림 */
+  .toast{
+    position:fixed;left:50%;bottom:24px;transform:translate(-50%,10px);z-index:80;
+    background:var(--ink);color:#fff;font-size:13px;font-weight:500;
+    padding:11px 18px;border-radius:var(--r-md);max-width:80vw;text-align:center;
+    opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;
+  }
+  .toast.on{opacity:1;transform:translate(-50%,0);}
+
+  @media (max-width:1100px){
+    .weeks .span{font-size:13.5px;}
+    th.c-std,td.c-std{width:20%;}
+  }
+  @media print{
+    .topbar,.weeks,.toast{display:none !important;}
+    body{overflow:visible;}
+    .app{height:auto;animation:none !important;}
+    .stage{padding:0;}
+    .sheet{border:none;border-radius:0;}
+    .scroll{overflow:visible;}
+  }
+
+  /* ════════ 다른 두 페이지와 같은 뼈대 ════════ */
+  /* 현황 줄 — 자리 배치 · 청소 역할의 '학생 30 · 자리 30' 과 같은 자리 · 같은 모양 */
+  .meta{
+    flex:none;height:36px;display:flex;align-items:center;gap:10px;padding:0 14px;
+    background:#f2f2f2;border-bottom:1px solid var(--line);
+    font-size:13px;color:var(--ink-2);
+  }
+  .meta .stats{display:flex;gap:15px;font-variant-numeric:tabular-nums;}
+  .meta .stats i{font-style:normal;color:var(--ink-3);}
+  .meta .stats b{font-weight:400;color:var(--mark);}
+
+  /* 날짜 줄 — 흰 바탕의 얇은 도구 줄 (현황 줄 아래) */
+  .weeks{
+    height:44px;gap:12px;padding:0 12px;background:var(--surface);
+    border-bottom:1px solid var(--line);
+  }
+  .weeks .nav{display:flex;gap:2px;padding:2px;background:#f0f0f0;border-radius:var(--r-md);}
+  .weeks .nav button{
+    height:28px;min-width:32px;padding:0;justify-content:center;
+    border:none;background:transparent;color:var(--ink-2);border-radius:var(--r-sm);
+  }
+  .weeks .nav button:hover{background:var(--surface);color:var(--ink);}
+  .weeks .span{font-size:15px;font-weight:600;letter-spacing:-.01em;}
+  .weeks .span small{margin-left:8px;font-size:12.5px;font-weight:400;color:var(--ink-3);}
+  .weeks .right{gap:4px;}
+  .weeks .right button{height:30px;}
+  .weeks .sep{height:18px;margin:0 4px;}
+  button.danger{color:var(--danger);}
+  button.danger:hover{background:#f7eceb;color:var(--danger);}
+
+  /* 표 — 청소 역할의 구역 상자와 같은 모서리 · 선 */
+  .stage{padding:8px 10px 10px;}
+  .sheet{border-radius:var(--r-lg);border-color:var(--line);}
+  thead th{background:#f7f7f7;}
+  th.c-day.today{background:#ececec;}
+
+  @media print{ .meta{display:none !important;} }
+  body.tv .meta{display:none !important;}
+
+  /* 인쇄 여백 최소 */
+  @page{margin:5mm;}
+
+  /* 가림막은 상단 바 아래만 덮는다 — 가린 채로도 다른 페이지로 갈 수 있게 */
+  .blind{top:48px;}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="pager">
+      <button id="toSeating">자리 배치</button>
+      <button id="toCleaning">청소 역할</button>
+      <button class="on">청소 체크</button>
+    </div>
+    <div class="sep"></div>
+    <button class="chip-btn" id="fileChip" title="저장 상태"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span class="label">연결 중</span></button>
+    <div class="right">
+      <button class="quiet icon" id="tvBtn" hidden title="TV 전환"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+      <button class="quiet icon" id="printBtn" title="인쇄"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg></button>
+      <div class="sep"></div>
+      <button id="blindBtn" title="화면을 잠깐 가립니다 (단축키 H) — 복제 모드로 TV 에 띄울 때"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9"/><path d="M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M1 1l22 22"/></svg><span class="lb">가리기</span></button>
+    </div>
+  </header>
+
+  <div class="meta"><div class="stats" id="sum"></div></div>
+
+  <div class="weeks">
+    <span class="nav">
+      <button id="prevWk" title="한 주 앞으로"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg></button><button id="prevDay" title="하루 앞으로"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button id="nextDay" title="하루 뒤로"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button><button id="nextWk" title="한 주 뒤로"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg></button>
+    </span>
+    <span class="span" id="wkLabel"></span>
+    <span class="right">
+      <button class="quiet" id="thisWeek">오늘</button>
+      <button class="quiet icon" id="pastBtn" title="지난 날짜 — 오늘이 아닌 날도 고칠 수 있게 합니다"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 12S3.7 8.2 7 8.2 12.4 12 12.4 12 10.3 15.8 7 15.8 1.6 12 1.6 12z"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><path d="M11.6 12S13.7 8.2 17 8.2 22.4 12 22.4 12 20.3 15.8 17 15.8s-5.4-3.8-5.4-3.8z"/><circle cx="17" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <div class="sep"></div>
+      <button class="quiet danger" id="clearWk">보이는 5일 지우기</button>
+    </span>
+  </div>
+
+  <main class="stage">
+    <div class="sheet">
+      <div class="scroll" id="scroll"></div>
+    </div>
+  </main>
+
+</div>
+
+<!-- 외부 화면에 올라갔을 때 덮는 막 -->
+<div class="guard" id="guard" hidden>
+  <div class="guard-box">
+    <b>이 화면은 TV 에 띄우지 않습니다</b>
+    <p>청소 체크는 선생님용입니다. 이 창을 <b>노트북 화면으로 옮겨</b> 주세요.<br>
+    TV 에는 <b>청소 역할</b> 화면을 띄우면 됩니다.</p>
+    <button id="guardGo">청소 역할로 가기</button>
+  </div>
+</div>
+
+<!-- 잠깐 가리기 (복제 모드용) -->
+<div class="blind" id="blind" hidden>
+  <div class="blind-box">
+    <b>화면을 가렸습니다</b>
+    <p>아무 곳이나 누르면 다시 보입니다 · 단축키 <b>H</b></p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+  const els = {
+    toSeating:$("toSeating"), toCleaning:$("toCleaning"), fileChip:$("fileChip"),
+    prevWk:$("prevWk"), nextWk:$("nextWk"), thisWeek:$("thisWeek"), wkLabel:$("wkLabel"),
+    prevDay:$("prevDay"), nextDay:$("nextDay"), pastBtn:$("pastBtn"),
+    blindBtn:$("blindBtn"), blind:$("blind"), guard:$("guard"), guardGo:$("guardGo"),
+    tvBtn:$("tvBtn"), clearWk:$("clearWk"), printBtn:$("printBtn"),
+    scroll:$("scroll"), sum:$("sum"), toast:$("toast")
+  };
+
+  const SERVER = location.protocol === "http:" || location.protocol === "https:";
+  const SERVER_NAME = "data.sqlite";
+  const DAYS = ["월", "화", "수", "목", "금"];
+  const TIERS = { easy:"쉬움", mid:"중간", hard:"어려움" };
+  const COLS_SHOWN = 5;                        // 화면에 보이는 평일 칸 수
+
+  let full = {}, C = null, students = [];
+  let sortBy = "area", sortDir = 1;            // area | name
+  const COLS = ["area", "std", "name"];        // 요일 왼쪽에 오는 열들
+  let colOrder = COLS.slice();                 // 끌어서 바꾼 순서
+  try{
+    const saved = JSON.parse(localStorage.getItem("check-cols") || "null");
+    if(Array.isArray(saved) && saved.length === COLS.length &&
+       COLS.every(k => saved.includes(k))) colOrder = saved;
+  }catch(e){}
+  const saveCols = () => { try{ localStorage.setItem("check-cols", JSON.stringify(colOrder)); }catch(e){} };
+  let anchor = weekday(new Date());            // 맨 왼쪽 칸의 날짜 (오늘부터)
+  let editPast = false;                        // 지난 날짜도 고칠 수 있는지
+
+  /* ── 임시 확인표 ───────────────────────────
+     "다 한 애"를 표시해 두고 남은 애를 찾는 용도.
+     점수·지적과 아무 상관이 없고, 이 브라우저에만 5시간 동안 남는다. */
+  const SCRATCH_MS = 5 * 60 * 60 * 1000;
+  let scratch = {};                            // "번호:항목" → 찍은 시각(ms)
+  function loadScratch(){
+    try{ scratch = JSON.parse(localStorage.getItem("check-scratch") || "{}") || {}; }
+    catch(e){ scratch = {}; }
+    pruneScratch();
+  }
+  function pruneScratch(){
+    const now = Date.now(), today = key(new Date());
+    let 바뀜 = false;
+    for(const k in scratch){
+      const v = scratch[k];
+      if(!v || now - v.t > SCRATCH_MS || v.d !== today){ delete scratch[k]; 바뀜 = true; }
+    }
+    if(바뀜) saveScratch();
+    return 바뀜;
+  }
+  const saveScratch = () => {
+    try{ localStorage.setItem("check-scratch", JSON.stringify(scratch)); }catch(e){}
+  };
+  const scratchOn = (no, item) => !!scratch[no + ":" + item];
+  function toggleScratch(no, item){
+    const k = no + ":" + item;
+    if(scratch[k]) delete scratch[k];
+    else scratch[k] = { t: Date.now(), d: key(new Date()) };
+    saveScratch();
+  }
+
+  /* ── 날짜 도우미 ──────────────────────────── */
+  function monday(d){
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+    return x;
+  }
+  const key = d => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") +
+                   "-" + String(d.getDate()).padStart(2,"0");
+  function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+  const md = d => (d.getMonth()+1) + "/" + d.getDate();
+
+  // 토·일은 건너뛴다. 주말에 켜면 다음 월요일부터 보여 준다.
+  function weekday(d){
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    while(x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() + 1);
+    return x;
+  }
+  function stepDay(d, n){
+    const x = new Date(d); const dir = n < 0 ? -1 : 1;
+    for(let i = 0; i < Math.abs(n); i++){
+      do{ x.setDate(x.getDate() + dir); }while(x.getDay() === 0 || x.getDay() === 6);
+    }
+    return x;
+  }
+  // 보이는 칸 : 기준일부터 평일 5개. 각 칸은 자기 날짜(=주 + 요일)를 안다.
+  function shownCols(){
+    const out = []; let d = new Date(anchor);
+    for(let i = 0; i < COLS_SHOWN; i++){
+      out.push({ date:new Date(d), wk:key(monday(d)), di:(d.getDay() + 6) % 7 });
+      d = stepDay(d, 1);
+    }
+    return out;
+  }
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
+                            a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const isToday = d => sameDay(d, new Date());
+
+  /* ── 데이터 ───────────────────────────────── */
+  const nameOf = no => (students.find(s => s.no === no) || {}).name || ("?" + no);
+  // 역할은 이제 목록(C.roles)으로 관리한다. 옛 저장본은 chief/vice/captain 으로 되비친다.
+  const leadNos = () => Array.isArray(C.roles) && C.roles.length
+    ? C.roles.map(r => r.no).filter(v => v != null)
+    : [C.chief, C.vice, C.captain].filter(v => v != null);
+
+  function adopt(d){
+    full = (d && typeof d === "object") ? d : {};
+    students = Array.isArray(full.students)
+      ? full.students.filter(s => s && s.name).map(s => ({ no:+s.no || 0, name:String(s.name) }))
+      : [];
+    C = (full.cleaning && typeof full.cleaning === "object") ? full.cleaning : {};
+    C.areas  = Array.isArray(C.areas) ? C.areas : [];
+    C.assign = (C.assign && typeof C.assign === "object") ? C.assign : {};
+    C.marks  = (C.marks && typeof C.marks === "object") ? C.marks : {};
+    // 예전 모양({번호:[요일]})이면 이번 주 것으로 본다
+    if(Object.keys(C.marks).some(k => /^[0-9]+$/.test(k))){
+      const wk = {};
+      for(const k in C.marks) if(Array.isArray(C.marks[k])) wk[k] = C.marks[k];
+      C.marks = { [key(monday(new Date()))]: wk };
+    }
+    // 항목 구분이 없던 모양([요일…])이면 첫 항목 것으로 옮긴다
+    for(const w in C.marks)
+      for(const no in C.marks[w])
+        if(Array.isArray(C.marks[w][no])) C.marks[w][no] = { 0: C.marks[w][no] };
+  }
+
+  const weekMarks = w => (C.marks[w] || (C.marks[w] = {}));
+  const dayList = (w, no, item) => ((C.marks[w] || {})[no] || {})[item] || [];
+  function has(w, no, item, day){ return dayList(w, no, item).includes(day); }
+  function toggle(w, no, item, day){
+    const wk = weekMarks(w);
+    const st = wk[no] || (wk[no] = {});
+    const list = st[item] || (st[item] = []);
+    const i = list.indexOf(day);
+    if(i >= 0) list.splice(i, 1); else { list.push(day); list.sort((a,b)=>a-b); }
+    if(!list.length) delete st[item];
+    if(!Object.keys(st).length) delete wk[no];
+    if(!Object.keys(wk).length) delete C.marks[w];
+  }
+  // 화면에 보이는 주의 지적 수 (항목을 모두 더한다)
+  function countShown(no){
+    return shownCols().reduce((n, c) => {
+      const st = (C.marks[c.wk] || {})[no] || {};
+      return n + Object.keys(st).reduce((m, it) => m + (st[it].includes(c.di) ? 1 : 0), 0);
+    }, 0);
+  }
+
+  // 구역이 실제로 청소하는 요일
+  const flat = t => String(t || "").replace(/\s/g, "");
+  function daysOf(a){
+    const n = flat(a.name) + flat((a.checks || []).join(""));
+    if(/월수금/.test(n)) return [0, 2, 4];
+    if(/화목/.test(n))   return [1, 3];
+    return [0, 1, 2, 3, 4];
+  }
+
+  /* ── 저장 ─────────────────────────────────── */
+  let saveTimer = null, retryTimer = null, failed = false, needsSave = false, editVersion = 0;
+  function save(){
+    needsSave = true; editVersion++;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(put, 300);
+  }
+  async function put(){
+    clearTimeout(saveTimer); saveTimer = null;
+    clearTimeout(retryTimer);
+    const version = editVersion;
+    if(!SERVER){ setChip("attn", "저장되지 않습니다"); return; }
+    try{
+      full.cleaning = C;
+      full.savedAt = new Date().toISOString();
+      const r = await fetch("api/data", {
+        method:"PUT", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(full)
+      });
+      if(!r.ok) throw new Error(r.status);
+      if(failed) toast("연결이 돌아와 밀린 내용을 저장했습니다.");
+      failed = false;
+      if(version === editVersion) needsSave = false;
+      setChip("linked", needsSave ? "저장 중" : "저장됨");
+      if(TV_CH) TV_CH.postMessage("changed");
+      return true;
+    }catch(e){
+      failed = true;
+      setChip("attn", "저장 안 됨");
+      if(!window.classroomStorage?.blocked) retryTimer = setTimeout(put, 3000);
+      return false;
+    }
+  }
+  async function load(){
+    if(needsSave || window.classroomStorage?.pending || window.classroomStorage?.blocked) return;
+    if(!SERVER){
+      setChip("attn", "start.vbs 로 열어야 저장됩니다");
+      adopt(null); render();
+      return;
+    }
+    try{
+      const r = await fetch("api/data", { cache:"no-store" });
+      if(!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      if(needsSave || window.classroomStorage?.pending) return;
+      window.classroomStorage?.acceptRead(r);
+      adopt(data);
+      setChip("linked", "자동 저장");
+      render();
+    }catch(e){
+      setChip("attn", "읽기 실패");
+    }
+  }
+  function setChip(mode, text){
+    els.fileChip.className = "chip-btn" + (mode ? " " + mode : "");
+    els.fileChip.querySelector(".label").textContent = text;
+  }
+
+  /* ── 그리기 ───────────────────────────────── */
+  // 화면에 올릴 줄 : 구역에 배정된 학생 하나가 한 줄
+  // "교실 쓸기(1분단)" → "교실 쓸기" · 분단이 달라도 하는 일이 같으면 한 묶음으로 본다
+  const baseName = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const stdKey = a => baseName(a.name) + "||" + (a.checks || []).join("|");
+
+  // 한 줄 = 학생 하나의 점검 항목 하나. 항목이 둘이면 그 학생은 두 줄이 된다.
+  function rows(){
+    const out = [];
+    for(const a of C.areas){
+      const items = (a.checks || []).filter(t => String(t).trim());
+      const list = items.length ? items : ["—"];
+      for(const no of (C.assign[a.id] || []))
+        list.forEach((text, item) => out.push({ a, no, item, text, of:list.length }));
+    }
+    if(sortBy === "name"){
+      out.sort((x, y) => ((x.no - y.no) * sortDir) || (x.item - y.item));
+    }else{
+      out.sort((x, y) =>
+        (x.a.name.localeCompare(y.a.name, "ko") * sortDir) || (x.no - y.no) || (x.item - y.item));
+    }
+    return out;
+  }
+
+  /* ── 머리를 끌어서 열 순서 바꾸기 ─────────── */
+  // 요일 칸은 날짜 순서라 고정이고, 왼쪽 세 열만 서로 자리를 바꾼다.
+  let dragKey = null, didDrag = false;
+
+  function makeDraggable(th, key){
+    th.draggable = true;
+    th.classList.add("movable");
+    th.dataset.col = key;
+
+    th.addEventListener("dragstart", e => {
+      dragKey = key; didDrag = true;
+      th.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try{ e.dataTransfer.setData("text/plain", key); }catch(err){}
+    });
+    th.addEventListener("dragend", () => {
+      dragKey = null;
+      document.querySelectorAll("th.dragging,th.over-l,th.over-r")
+        .forEach(x => x.classList.remove("dragging", "over-l", "over-r"));
+      setTimeout(() => { didDrag = false; }, 0);
+    });
+    th.addEventListener("dragover", e => {
+      if(dragKey === null || dragKey === key) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const r = th.getBoundingClientRect();
+      const left = (e.clientX - r.left) < r.width / 2;
+      th.classList.toggle("over-l", left);
+      th.classList.toggle("over-r", !left);
+    });
+    th.addEventListener("dragleave", () => th.classList.remove("over-l", "over-r"));
+    th.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = dragKey;
+      th.classList.remove("over-l", "over-r");
+      if(from === null || from === key) return;
+      const r = th.getBoundingClientRect();
+      const left = (e.clientX - r.left) < r.width / 2;
+
+      const next = colOrder.filter(k => k !== from);
+      let at = next.indexOf(key);
+      if(!left) at += 1;
+      next.splice(at, 0, from);
+      colOrder = next;
+      saveCols();
+      render();
+      toast("열 순서를 바꿨습니다: " + colOrder.map(k => LABEL[k]).join(" · "));
+    });
+  }
+  const LABEL = { area:"구역", std:"점검 기준", name:"이름" };
+
+  function render(){
+    if(!C){ return; }
+    const list = rows();
+    els.wkLabel.innerHTML = "";
+    const cs = shownCols();
+    const span = document.createElement("span");
+    span.textContent = `${md(cs[0].date)}(${DAYS[cs[0].di]}) ~ ${md(cs[COLS_SHOWN-1].date)}(${DAYS[cs[COLS_SHOWN-1].di]})`;
+    const sm = document.createElement("small");
+    sm.textContent = cs.some(c => isToday(c.date)) ? "오늘부터" : `${cs[0].date.getFullYear()}년`;
+    els.wkLabel.append(span, sm);
+
+    if(!list.length){
+      els.scroll.replaceChildren(Object.assign(document.createElement("div"),
+        { className:"empty", textContent:"배정된 청소가 없습니다. ‘청소 역할’ 에서 뽑기를 먼저 해 주세요." }));
+      els.sum.textContent = "";
+      return;
+    }
+
+    const table = document.createElement("table");
+
+    /* 머리 : 1줄 = 주 묶음, 2줄 = 요일 */
+    const thead = document.createElement("thead");
+    const r1 = document.createElement("tr");
+    const cols = shownCols();
+
+    const mkTh = (cls, text, span2, sortKey) => {
+      const th = document.createElement("th");
+      th.className = cls;
+      th.textContent = text;
+      if(sortKey){
+        th.classList.add("sortable");
+        if(sortBy === sortKey) th.classList.add("on");
+        const ar = document.createElement("span");
+        ar.className = "ar";
+        ar.textContent = sortBy === sortKey ? (sortDir > 0 ? "▲" : "▼") : "▲";
+        th.append(ar);
+        th.title = sortKey === "area" ? "구역 이름 ㄱㄴㄷ 순으로 정렬" : "번호 순으로 정렬";
+        th.addEventListener("click", () => {
+          if(didDrag) return;                 // 방금 끌어 옮긴 것이면 정렬하지 않는다
+          if(sortBy === sortKey) sortDir = -sortDir;
+          else { sortBy = sortKey; sortDir = 1; }
+          render();
+        });
+      }
+      return th;
+    };
+    const DEF = {
+      area: { cls:"c-area", label:"구역",      sort:"area" },
+      std:  { cls:"c-std",  label:"점검 기준", sort:null   },
+      name: { cls:"c-nm",   label:"이름",      sort:"name" }
+    };
+    for(const k of colOrder){
+      const d = DEF[k];
+      const th = mkTh(d.cls, d.label, false, d.sort);
+      makeDraggable(th, k);
+      r1.append(th);
+    }
+
+    r1.append(mkTh("c-it", "항목", false, null));
+    {
+      const th = mkTh("c-sc", "확인", false, null);
+      th.title = "다 한 사람을 표시해 두는 칸입니다. 5시간 뒤 저절로 지워지고, 점수와는 무관합니다.";
+      r1.append(th);
+    }
+
+    cols.forEach((c, ci) => {
+      const th = document.createElement("th");
+      th.className = "c-day" + (isToday(c.date) ? " today" : "") + (ci && c.di === 0 ? " wk-edge" : "");
+      const a = document.createElement("b"); a.textContent = DAYS[c.di];
+      const b = document.createElement("small"); b.textContent = md(c.date);
+      th.append(a, b);
+      r1.append(th);
+    });
+    r1.append(mkTh("c-sum", "지적", false, null));
+    thead.append(r1);
+    table.append(thead);
+
+    /* 몸통 */
+    const tbody = document.createElement("tbody");
+    // 위아래로 붙어 있는 같은 구역 / 같은 학생끼리 칸을 합친다
+    const spanArea = [], spanStu = [], spanStd = [];
+    list.forEach((r, i) => {
+      const pa = list[i-1];
+      if(pa && pa.a.id === r.a.id) spanArea[spanArea.length-1].n++;
+      else spanArea.push({ at:i, n:1 });
+      if(pa && pa.a.id === r.a.id && pa.no === r.no) spanStu[spanStu.length-1].n++;
+      else spanStu.push({ at:i, n:1 });
+      // 하는 일이 같은 역할(분단만 다른 것 포함)끼리 기준 칸을 통째로 합친다
+      if(pa && stdKey(pa.a) === stdKey(r.a)) spanStd[spanStd.length-1].n++;
+      else spanStd.push({ at:i, n:1 });
+    });
+    const areaAt = {}, stuAt = {}, stdAt = {};
+    for(const g of spanArea) areaAt[g.at] = g.n;
+    for(const g of spanStu)  stuAt[g.at]  = g.n;
+    for(const g of spanStd)  stdAt[g.at]  = g.n;
+
+    list.forEach((r, i) => {
+      const tr = document.createElement("tr");
+      if(areaAt[i]) tr.classList.add("grp-first");
+      else if(stuAt[i]) tr.classList.add("stu-first");
+
+      const tdSum = document.createElement("td");
+      tdSum.className = "c-sum";
+
+      for(const kcol of colOrder){
+        if(kcol === "std"){
+          if(stdAt[i]){
+            const td = document.createElement("td");
+            td.className = "c-std" + (stdAt[i] >= 3 ? " big" : "");
+            td.rowSpan = stdAt[i];
+            const items = (r.a.checks || []).filter(t => String(t).trim());
+            if(!items.length){
+              td.textContent = "—";
+            }else{
+              items.forEach((text, k) => {
+                const line = document.createElement("div");
+                line.className = "std-line";
+                if(items.length > 1){
+                  const b = document.createElement("b");
+                  b.className = "it"; b.textContent = (k + 1) + ". ";
+                  line.append(b);
+                }
+                line.append(document.createTextNode(text));
+                td.append(line);
+              });
+            }
+            tr.append(td);
+          }
+        }else if(kcol === "area"){
+          if(areaAt[i]){
+            const td = document.createElement("td");
+            td.className = "c-area"; td.rowSpan = areaAt[i];
+            td.textContent = r.a.name; td.title = TIERS[r.a.tier] || "";
+            tr.append(td);
+          }
+        }else if(kcol === "name"){
+          if(stuAt[i]){
+            const td = document.createElement("td");
+            td.className = "c-nm"; td.rowSpan = stuAt[i];
+            td.textContent = `${r.no} ${nameOf(r.no)}`;
+            tr.append(td);
+          }
+        }
+      }
+
+      // 이 줄이 몇 번째 점검 항목인지 (항목이 하나면 비워 둔다)
+      const tdIt = document.createElement("td");
+      tdIt.className = "c-it";
+      tdIt.textContent = r.of > 1 ? String(r.item + 1) : "";
+      tr.append(tdIt);
+
+      // 임시 확인 칸 (점수와 무관)
+      const tdSc = document.createElement("td");
+      const scOn = scratchOn(r.no, r.item);
+      tdSc.className = "c-sc" + (scOn ? " on" : "");
+      tdSc.textContent = scOn ? "✓" : "";
+      tdSc.title = "다 했으면 눌러 두세요 (5시간 뒤 저절로 지워집니다)";
+      tdSc.addEventListener("click", () => {
+        toggleScratch(r.no, r.item);
+        const now = scratchOn(r.no, r.item);
+        tdSc.classList.toggle("on", now);
+        tdSc.textContent = now ? "✓" : "";
+      });
+      tr.append(tdSc);
+
+      // 요일 제한 없음 : 어느 구역이든 아무 요일에나 지적할 수 있다.
+      // (전날 청소를 다음날 아침에 지적하는 일이 흔해서 요일로 칸을 닫지 않는다)
+      const cleanDays = daysOf(r.a).map(i => DAYS[i]).join("·");
+      cols.forEach((c, ci) => {
+        const td = document.createElement("td");
+        const today = isToday(c.date);
+        const locked = !today && !editPast;           // 오늘이 아니면 기본은 잠김
+        const on = has(c.wk, r.no, r.item, c.di);
+        td.className = "c-box" + (on ? " on" : "") +
+                       (locked ? " locked" : "") + (today ? " today" : "") +
+                       (ci && c.di === 0 ? " wk-edge" : "");
+        td.textContent = on ? "✓" : "";
+        if(!locked){
+          td.title = `${md(c.date)} (${DAYS[c.di]}) · ${r.text}` +
+                     (cleanDays === "월·화·수·목·금" ? "" : `  [청소일 ${cleanDays}]`);
+          td.addEventListener("click", () => {
+            toggle(c.wk, r.no, r.item, c.di);
+            const now = has(c.wk, r.no, r.item, c.di);
+            td.classList.toggle("on", now);
+            td.textContent = now ? "✓" : "";
+            const n = countShown(r.no);
+            const cell = tbody.querySelector(`td.c-sum[data-no="${r.no}"]`);
+            if(cell){ cell.textContent = n || ""; cell.classList.toggle("on", n > 0); }
+            updateSum();
+            save();
+          });
+        }else if(locked){
+          td.title = "오늘이 아닙니다 — 눈 아이콘(지난 날짜)을 켜면 고칠 수 있습니다";
+        }
+        tr.append(td);
+      });
+
+      if(stuAt[i]){
+        const c = countShown(r.no);
+        tdSum.rowSpan = stuAt[i];
+        tdSum.dataset.no = r.no;
+        tdSum.textContent = c || "";
+        tdSum.classList.toggle("on", c > 0);
+        tr.append(tdSum);
+      }
+      tbody.append(tr);
+    });
+    table.append(tbody);
+    els.scroll.replaceChildren(table);
+    updateSum();
+    fit();
+  }
+
+  // 표가 화면 높이를 꽉 채우도록 배율을 찾는다 (넘치지 않는 가장 큰 값)
+  function fit(){
+    const box = els.scroll, table = box.querySelector("table");
+    if(!table) return;
+    const avail = box.clientHeight;
+    if(!avail) return;
+    const MIN = 0.6;
+    let lo = MIN, hi = 3.2;
+    for(let i = 0; i < 14; i++){
+      const k = (lo + hi) / 2;
+      box.style.setProperty("--k", k);
+      if(table.scrollHeight <= avail) lo = k; else hi = k;
+    }
+    // 반올림·소수 오차로 살짝 넘치는 경우가 있어 확인하고 조금씩 줄인다
+    let k = lo, guard = 0;
+    box.style.setProperty("--k", k.toFixed(3));
+    while(table.scrollHeight > avail && k > MIN && guard++ < 20){
+      k -= 0.015;
+      box.style.setProperty("--k", k.toFixed(3));
+    }
+  }
+  window.addEventListener("resize", fit);
+  document.addEventListener("fullscreenchange", () => setTimeout(fit, 60));
+
+  function updateSum(){
+    const nos = new Set();
+    for(const a of C.areas) for(const no of (C.assign[a.id] || [])) nos.add(no);
+    let 인원 = 0, 합 = 0;
+    for(const no of nos){ const c = countShown(no); if(c){ 인원++; 합 += c; } }
+    // 현황 줄 — 다른 페이지처럼 숫자는 흐리게. 지적이 있으면 그 숫자만 붉게
+    els.sum.replaceChildren(...[
+      ["구역", C.areas.length, false], ["배정", nos.size, false],
+      ["지적 학생", 인원, 인원 > 0], ["지적", 합 + "회", 합 > 0],
+    ].map(([lab, n, hot]) => {
+      const sp = document.createElement("span");
+      sp.append(lab + " ");
+      const v = document.createElement(hot ? "b" : "i");
+      v.textContent = n;
+      sp.append(v);
+      return sp;
+    }));
+  }
+
+  function toast(msg, ms){
+    els.toast.textContent = msg;
+    els.toast.classList.add("on");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => els.toast.classList.remove("on"), ms || 3000);
+  }
+
+  /* ── 외부 화면에 나가지 않게 ───────────────── */
+  // 확장 모드 : 이 창이 외부 화면 위에 있으면 덮어서 못 보게 한다.
+  // 복제 모드 : 브라우저가 감지할 수도, 막을 수도 없다 → 가리기 버튼으로 대응한다.
+  if(new URLSearchParams(location.search).has("tv")){
+    document.documentElement.innerHTML =
+      '<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;' +
+      'background:#0f1319;color:#9aa5b1;font-family:sans-serif;font-size:15px">' +
+      '청소 체크는 TV 에 띄우지 않습니다</body>';
+    throw new Error("tv 모드로는 열지 않는다");
+  }
+
+  async function guardScreen(){
+    if(!window.getScreenDetails) return;
+    try{
+      const d = await window.getScreenDetails();
+      const 외부 = d.screens.length > 1 && d.currentScreen && !d.currentScreen.isPrimary;
+      els.guard.hidden = !외부;
+    }catch(e){ /* 권한이 없으면 판단하지 않는다 */ }
+  }
+  setInterval(guardScreen, 2000);
+  guardScreen();
+  els.guardGo.addEventListener("click", () => navTo("cleaning.html"));
+
+  // 잠깐 가리기 — 복제 모드에서 TV 에 비칠 때 즉시 덮는다
+  let autoBlinded = false;               // HDMI 가 연결돼서 저절로 가린 것인가
+  function setBlind(on, auto){
+    els.blind.hidden = !on;
+    autoBlinded = !!(on && auto);
+    const t = els.blind.querySelector("b");
+    if(t) t.textContent = autoBlinded ? "TV 가 연결되어 가렸습니다" : "화면을 가렸습니다";
+    els.blindBtn.classList.toggle("on", on);
+    const bl = els.blindBtn.querySelector(".lb");
+    if(bl) bl.textContent = on ? "가림 해제" : "가리기";
+    els.blindBtn.title = (on ? "가림 해제" : "화면을 잠깐 가립니다") + " (단축키 H)";
+  }
+  els.blindBtn.addEventListener("click", () => setBlind(els.blind.hidden));
+  els.blind.addEventListener("click", () => setBlind(false));
+
+  /* ── TV 창 다루기 ─────────────────────────── */
+  // 청소 페이지에서 띄운 TV 창과 같은 통로를 쓴다. 살아 있으면 끄기 버튼이 된다.
+  const TV_CH = ("BroadcastChannel" in window) ? new BroadcastChannel("classroom-screen") : null;
+  let tvAlive = 0, tvWin = null;
+  const tvReady = () => !!(window.screen && screen.isExtended);
+
+  if(TV_CH){
+    TV_CH.onmessage = e => {
+      if(e.data && e.data.alive){ tvAlive = Date.now(); syncTvBtn(); }
+    };
+    setInterval(() => { if(TV_CH) TV_CH.postMessage({ ask:1 }); }, 1500);
+  }
+  function tvOn(){ return Date.now() - tvAlive < 4500; }
+
+  function syncTvBtn(){
+    const on = tvOn();
+    els.tvBtn.hidden = !tvReady() && !on;
+    els.tvBtn.title = on ? "TV 끄기 — TV 화면을 닫습니다" : "TV 에 청소 구역을 크게 띄웁니다";
+  }
+  // 브라우저는 한 번의 클릭으로 "팝업 열기"와 "전체화면" 을 같이 해 주지 않는다.
+  // (둘이 같은 사용자 동작을 서로 소비한다) → 팝업을 먼저 열고,
+  // 그 다음 아무 클릭이나 키 입력에 이 화면을 전체화면으로 만든다.
+  function armFullscreen(){
+    if(document.fullscreenElement) return;
+    let bar = document.getElementById("fsHint");
+    if(!bar){
+      bar = document.createElement("div");
+      bar.id = "fsHint";
+      bar.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;" +
+        "background:#1c2431;color:#fff;font-size:14px;font-weight:700;padding:11px 18px;" +
+        "border-radius:11px;cursor:pointer;box-shadow:0 6px 24px rgba(15,20,30,.3);";
+      bar.textContent = "Enter 를 누르면 TV 가, 이 화면을 누르면 여기도 전체화면이 됩니다";
+      document.body.appendChild(bar);
+    }
+    const go = () => {
+      document.removeEventListener("click", go, true);
+      document.removeEventListener("keydown", go, true);
+      bar.remove();
+      goFullNow();
+    };
+    document.addEventListener("click", go, true);
+    document.addEventListener("keydown", go, true);
+    setTimeout(() => { if(document.getElementById("fsHint")) bar.remove(); }, 15000);
+  }
+
+  function goFullNow(){
+    const el = document.documentElement;
+    if(document.fullscreenElement || !el.requestFullscreen) return;
+    try{ const p = el.requestFullscreen({ navigationUI:"hide" }); if(p) p.catch(() => {}); }
+    catch(e){}
+  }
+
+  async function toggleTv(){
+    if(tvOn()){
+      TV_CH && TV_CH.postMessage({ cmd:"close" });
+      tvAlive = 0; syncTvBtn();
+      if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      return;
+    }
+    let feat = "width=1280,height=800";
+    try{
+      if(window.getScreenDetails){
+        const d = await window.getScreenDetails();
+        const other = d.screens.filter(s => s !== d.currentScreen);
+        const t = other.find(s => !s.isPrimary) || other[0];
+        if(t) feat = `left=${t.availLeft},top=${t.availTop},width=${t.availWidth},height=${t.availHeight}`;
+      }
+    }catch(e){}
+    // 웹은 /seating/cleaning/, 프로그램(start.bat)은 cleaning.html — 주소 모양으로 가른다
+    const tvUrl = /\/seating(\/|$)/.test(location.pathname) ? "/seating/cleaning/?tv=1" : "cleaning.html?tv=1";
+    tvWin = window.open(tvUrl, "classroomTv",
+                        feat + ",menubar=no,toolbar=no,location=no,status=no");
+    if(!tvWin){ toast("팝업이 막혀 있습니다. 주소창 오른쪽의 팝업 허용을 눌러 주세요.", 6000); return; }
+    try{ tvWin.focus(); }catch(e){}   // 키보드를 TV 로 → Enter 한 번이면 TV 가 전체화면
+    armFullscreen();                   // 다음 클릭에 이 화면도 전체화면
+    setTimeout(syncTvBtn, 1200);
+    setTimeout(fit, 400);
+  }
+  setInterval(syncTvBtn, 2000);
+  syncTvBtn();
+
+  // HDMI(확장 모드)가 연결되는 순간 체크 표를 저절로 가린다. 상단 바는 그대로라 다른 페이지로 갈 수 있다.
+  // 선생님이 풀면 연결이 유지되는 동안은 다시 가리지 않고, 연결이 끊기면 저절로 가린 것만 푼다.
+  let wasExt = null;
+  function autoBlind(){
+    const ext = tvReady();
+    if(ext && wasExt !== true) setBlind(true, true);
+    else if(!ext && wasExt === true && autoBlinded && !els.blind.hidden) setBlind(false);
+    wasExt = ext;
+  }
+  autoBlind();
+  setInterval(autoBlind, 2000);
+  try{ screen.addEventListener("change", autoBlind); }catch(e){}
+
+  /* ── 이벤트 ───────────────────────────────── */
+  /* ── 페이지 전환 ───────────────────────────── */
+  // 탭 순서 : 자리 배치 → 청소 역할 → 청소 체크.
+  const PAGES = ["index.html", "cleaning.html", "check.html"];
+  const pageIdx = u => {
+    const f = String(u).split("/").pop().split("?")[0];
+    const i = PAGES.indexOf(f || "index.html");
+    return i < 0 ? 0 : i;
+  };
+  const HERE = pageIdx(location.pathname);
+
+  document.querySelector(".app").addEventListener("animationend", () =>
+    document.body.classList.remove("entering-right", "entering-left"));
+
+  window.addEventListener("beforeunload", e => {
+    if(SERVER && (needsSave || window.classroomStorage?.pending)){
+      e.preventDefault(); e.returnValue = "";
+    }
+  });
+  let navigating = false;
+  async function flushBeforeNavigation(){
+    clearTimeout(saveTimer); saveTimer = null;
+    if(SERVER){
+      while(needsSave || window.classroomStorage?.pending){
+        if(!await put()) return false;
+      }
+      return !window.classroomStorage?.blocked;
+    }
+    return true;
+  }
+
+  async function navTo(url){
+    const dir = pageIdx(url) > HERE ? "left" : "right";
+    if(navigating) return;
+    navigating = true;
+    if(!await flushBeforeNavigation()){
+      navigating = false;
+      toast("저장하지 못해 화면 이동을 멈췄습니다. 저장 상태를 확인해 주세요.");
+      return;
+    }
+    sessionStorage.setItem("navdir", dir);
+    document.body.classList.add(dir === "left" ? "leaving-left" : "leaving-right");
+    setTimeout(() => { location.href = url; }, 235);
+  }
+  els.toCleaning.addEventListener("click", () => navTo("cleaning.html"));
+  els.toSeating.addEventListener("click", () => navTo("index.html"));
+
+  const navdir = sessionStorage.getItem("navdir");
+  if(navdir){
+    sessionStorage.removeItem("navdir");
+    document.body.classList.add(navdir === "right" ? "entering-left" : "entering-right");
+  }
+  els.tvBtn.addEventListener("click", toggleTv);
+  els.printBtn.addEventListener("click", () => window.print());
+
+  const moveTo = d => { anchor = weekday(d); render(); };
+  els.prevDay.addEventListener("click", () => moveTo(stepDay(anchor, -1)));
+  els.nextDay.addEventListener("click", () => moveTo(stepDay(anchor,  1)));
+  els.prevWk .addEventListener("click", () => moveTo(addDays(anchor, -7)));
+  els.nextWk .addEventListener("click", () => moveTo(addDays(anchor,  7)));
+  els.thisWeek.addEventListener("click", () => moveTo(new Date()));
+
+  // 지난 날짜 : 오늘이 아닌 칸도 누를 수 있게 한다
+  els.pastBtn.addEventListener("click", () => {
+    editPast = !editPast;
+    els.pastBtn.classList.toggle("on", editPast);
+    els.pastBtn.title = editPast ? "지난 날짜 고치기 — 켜짐"
+                                 : "지난 날짜 — 오늘이 아닌 날도 고칠 수 있게 합니다";
+    render();
+    toast(editPast ? "지난·앞선 날짜도 고칠 수 있습니다."
+                   : "오늘 칸만 누를 수 있습니다.");
+  });
+
+  els.clearWk.addEventListener("click", () => {
+    const cs = shownCols();
+    let 있음 = false;
+    for(const c of cs){
+      const wk = C.marks[c.wk] || {};
+      for(const no in wk) for(const it in wk[no]) if(wk[no][it].includes(c.di)) 있음 = true;
+    }
+    if(!있음){ toast("보이는 날짜에는 표시된 체크가 없습니다."); return; }
+    if(!confirm("화면에 보이는 5일의 체크를 모두 지울까요?")) return;
+    for(const c of cs){
+      const wk = C.marks[c.wk]; if(!wk) continue;
+      for(const no in wk){
+        for(const it in wk[no]){
+          wk[no][it] = wk[no][it].filter(d => d !== c.di);
+          if(!wk[no][it].length) delete wk[no][it];
+        }
+        if(!Object.keys(wk[no]).length) delete wk[no];
+      }
+      if(!Object.keys(wk).length) delete C.marks[c.wk];
+    }
+    render(); save();
+    toast("이번 주 체크를 지웠습니다.");
+  });
+
+  document.addEventListener("keydown", e => {
+    if(/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+    if(e.key === "h" || e.key === "H" || e.key === "ㅗ"){ setBlind(els.blind.hidden); return; }   // 한글 입력 중이면 ㅗ
+    if(e.key === "ArrowLeft"){ moveTo(stepDay(anchor, -1)); }
+    if(e.key === "ArrowRight"){ moveTo(stepDay(anchor,  1)); }
+  });
+
+  window.addEventListener("focus", load);      // 다른 창에서 바뀐 내용을 다시 읽는다
+  if(SERVER){
+    const ping = () => fetch("api/ping", { cache:"no-store" }).catch(() => {});
+    ping(); setInterval(ping, 5000);
+    document.addEventListener("visibilitychange", () => { if(!document.hidden) ping(); });
+  }
+  loadScratch();
+  setInterval(() => { if(pruneScratch()) render(); }, 60000);   // 5시간 지난 것은 스스로 사라진다
+  load();
+})();
+</script>
+</body>
+</html>

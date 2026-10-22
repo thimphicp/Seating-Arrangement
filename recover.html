@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<script src="persistence.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>데이터 복구</title>
+<style>
+  *{box-sizing:border-box;}
+  body{
+    margin:0;padding:34px 26px;background:#f4f5f7;color:#1c2431;
+    font-family:"Noto Sans KR","Malgun Gothic",sans-serif;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+  h1{font-size:20px;margin:0;}
+  .lead{margin:0;font-size:13.5px;color:#6b7686;line-height:1.7;}
+  .card{background:#fff;border:1px solid #e3e6ea;border-radius:14px;padding:18px 20px;}
+  .card h2{margin:0 0 12px;font-size:14px;}
+  .card.win{border-color:#cfe8d6;background:#f7fdf9;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  td{padding:6px 4px;border-bottom:1px solid #f1f3f5;}
+  td:first-child{color:#6b7686;width:150px;}
+  td b{font-weight:700;}
+  .new{color:#15803d;font-weight:800;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;}
+  button{
+    font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;
+    padding:12px 20px;border-radius:10px;border:1px solid #d9dde3;background:#fff;color:#1c2431;
+  }
+  button:hover{background:#f2f4f7;}
+  button.go{background:#16a34a;border-color:#16a34a;color:#fff;}
+  button.go:hover{background:#15803d;}
+  button:disabled{opacity:.45;cursor:default;}
+  .msg{font-size:13.5px;font-weight:700;padding:12px 14px;border-radius:10px;display:none;}
+  .msg.ok{display:block;background:#f1fbf4;border:1px solid #cfe8d6;color:#15803d;}
+  .msg.bad{display:block;background:#fff4e8;border:1px solid #f5d3ae;color:#9a5215;}
+  code{background:#eef0f3;padding:1px 5px;border-radius:4px;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>데이터 복구</h1>
+  <p class="lead">
+    이 프로그램은 저장할 때 <b>브라우저에도 항상 한 벌을 남깁니다.</b>
+    서버가 꺼져 있어 저장에 실패했거나 파일이 예전 것으로 되돌아간 경우, 여기서 되살릴 수 있습니다.<br>
+    아래 두 내용을 비교해 보고, 브라우저 쪽이 더 최신이면 <b>되살리기</b> 를 누르세요.
+  </p>
+
+  <div class="card" id="cmp"><h2>확인 중…</h2></div>
+
+  <div class="row">
+    <button class="go" id="apply" disabled>브라우저에 남은 내용으로 되살리기</button>
+    <button id="dl">브라우저 내용을 파일로 내려받기</button>
+    <button id="open">프로그램 열기</button>
+  </div>
+  <div class="msg" id="msg"></div>
+
+  <p class="lead">
+    되살리기를 누르면 지금 <code>data.sqlite</code> 의 내용이 브라우저에 남은 내용으로 바뀝니다.
+    되돌리기 전 상태가 필요하면 먼저 <b>파일로 내려받기</b> 로 한 벌 받아 두세요.
+  </p>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const KEY = "seating-chart-cache";
+  const $ = id => document.getElementById(id);
+  let cache = null;
+
+  const sum = d => {
+    if(!d || typeof d !== "object") return null;
+    const c = d.cleaning || {};
+    const assigned = Object.values(c.assign || {}).reduce((n, v) => n + (v || []).length, 0);
+    return {
+      savedAt: d.savedAt || "(없음)",
+      students: (d.students || []).length,
+      seats: (d.seats || []).filter(v => v != null).length,
+      areas: (c.areas || []).length,
+      cap: (c.areas || []).reduce((n, a) => n + (+a.cap || 0), 0),
+      assigned,
+      history: (c.history || []).length,
+      excluded: (c.excluded || []).length
+    };
+  };
+
+  const when = s => {
+    const d = new Date(s);
+    return isNaN(d) ? String(s)
+      : `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} ` +
+        `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  };
+
+  function row(label, a, b, better){
+    const hi = better && a !== b ? ' class="new"' : "";
+    return `<tr><td>${label}</td><td${hi}><b>${a}</b></td><td>${b}</td></tr>`;
+  }
+
+  (async () => {
+    try{ cache = JSON.parse(localStorage.getItem(KEY) || "null"); }catch(e){}
+    let server = null;
+    try{
+      const response = await fetch("api/data", { cache:"no-store" });
+      if(!response.ok) throw new Error(response.status);
+      server = await response.json();
+      window.classroomStorage?.acceptRead(response);
+    }catch(e){}
+
+    const A = sum(cache), B = sum(server);
+    if(!A){
+      $("cmp").innerHTML = "<h2>브라우저에 남은 내용이 없습니다</h2>" +
+        "<p class='lead'>이 브라우저에서 프로그램을 쓴 적이 없거나, 이미 지워졌습니다. " +
+        "다른 브라우저에서 쓰셨다면 그쪽에서 이 페이지를 열어 보세요.</p>";
+      return;
+    }
+    const newer = A.savedAt > (B ? B.savedAt : "");
+    $("cmp").className = "card" + (newer ? " win" : "");
+    $("cmp").innerHTML =
+      `<h2>${newer ? "브라우저에 더 최신 내용이 있습니다" : "브라우저 내용이 더 최신은 아닙니다"}</h2>` +
+      "<table><tr><td></td><td><b>브라우저에 남은 것</b></td><td>지금 파일(data.sqlite)</td></tr>" +
+      row("저장 시각", when(A.savedAt), B ? when(B.savedAt) : "-", newer) +
+      row("학생", A.students + "명", B ? B.students + "명" : "-") +
+      row("좌석 배치", A.seats + "칸", B ? B.seats + "칸" : "-") +
+      row("청소 구역", A.areas + "곳", B ? B.areas + "곳" : "-", true) +
+      row("정원 합계", A.cap + "명", B ? B.cap + "명" : "-", true) +
+      row("청소 배정", A.assigned + "명", B ? B.assigned + "명" : "-", true) +
+      row("확정된 배정 기록", A.history + "회", B ? B.history + "회" : "-", true) +
+      row("청소 제외", A.excluded + "명", B ? B.excluded + "명" : "-") +
+      "</table>";
+    $("apply").disabled = false;
+  })();
+
+  $("apply").addEventListener("click", async () => {
+    if(!cache) return;
+    if(!confirm("지금 파일 내용을 브라우저에 남은 내용으로 바꿉니다. 진행할까요?")) return;
+    try{
+      const r = await fetch("api/data", {
+        method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(cache)
+      });
+      if(!r.ok) throw new Error(r.status);
+      $("msg").className = "msg ok";
+      $("msg").textContent = "되살렸습니다. ‘프로그램 열기’ 로 확인해 주세요.";
+      $("apply").disabled = true;
+    }catch(e){
+      $("msg").className = "msg bad";
+      $("msg").textContent = "실패했습니다: " + e.message + " — 프로그램(start.vbs)이 켜져 있는지 확인해 주세요.";
+    }
+  });
+
+  $("dl").addEventListener("click", () => {
+    if(!cache) return;
+    const b = new Blob([JSON.stringify(cache, null, 2)], { type:"application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "browser-backup.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  $("open").addEventListener("click", () => { location.href = "index.html"; });
+})();
+</script>
+</body>
+</html>
